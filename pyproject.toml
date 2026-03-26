@@ -1,0 +1,22 @@
+[project]
+name = "ufc-blast"
+version = "0.1.0"
+description = "UFC 3-340-02 blast wave calculator for building facade pressure analysis"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.14",
+    "pyvista>=0.44",
+    "matplotlib>=3.9",
+]
+
+[project.optional-dependencies]
+extract = ["openpyxl>=3.1"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+ufc-blast = "ufc_blast.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
