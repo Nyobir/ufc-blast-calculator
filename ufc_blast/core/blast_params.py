@@ -11,6 +11,7 @@ All scaling follows the cube-root (Hopkinson-Cranz) law.
 from __future__ import annotations
 
 import math
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,7 +20,14 @@ from scipy.optimize import brentq
 
 from ufc_blast.core.interpolation import Table1D, Table2D
 
-DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "free_air"
+# When frozen by PyInstaller, data files live next to the executable
+# (sys._MEIPASS for --onefile, or the exe directory for --onedir).
+if getattr(sys, "frozen", False):
+    _BASE = Path(sys._MEIPASS)
+else:
+    _BASE = Path(__file__).resolve().parent.parent.parent
+
+DATA_DIR = _BASE / "data" / "free_air"
 
 
 @dataclass

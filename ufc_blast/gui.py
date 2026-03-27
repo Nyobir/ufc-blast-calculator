@@ -79,9 +79,13 @@ def _compute_results(
 
 
 class _ComputeWorker(QThread):
-    """Background thread for blast computation."""
+    """Background thread for blast computation.
 
-    finished = Signal(list, dict, float)  # grid_points, result_map, elapsed
+    Results are stored as attributes rather than passed through Signal args,
+    because PySide6 cannot serialise arbitrary Python dicts across threads.
+    """
+
+    finished = Signal()
 
     def __init__(self, R, W, Hc, width, height, step):
         super().__init__()
@@ -91,20 +95,23 @@ class _ComputeWorker(QThread):
         self.width = width
         self.height = height
         self.step = step
-        self.error = None
+        self.error: str | None = None
+        self.grid_points: list | None = None
+        self.result_map: dict | None = None
+        self.elapsed: float = 0.0
 
     def run(self):
         t0 = time.perf_counter()
         try:
-            grid_points = generate_grid(
+            self.grid_points = generate_grid(
                 self.R, self.W, self.Hc,
                 width=self.width, height=self.height, step=self.step,
             )
-            result_map = _compute_results(grid_points, self.W)
-            elapsed = time.perf_counter() - t0
-            self.finished.emit(grid_points, result_map, elapsed)
+            self.result_map = _compute_results(self.grid_points, self.W)
+            self.elapsed = time.perf_counter() - t0
         except Exception as exc:
             self.error = str(exc)
+        self.finished.emit()
 
 
 def _build_meshgrid(
@@ -591,20 +598,24 @@ class BlastWindow(QMainWindow):
         self._worker_height = height
         self._worker.start()
 
-    def _on_compute_done(self, grid_points, result_map, elapsed) -> None:
+    def _on_compute_done(self) -> None:
         """Called when background computation finishes."""
         self._recalc_btn.setEnabled(True)
 
-        self._grid_points = grid_points
-        self._result_map  = result_map
+        if self._worker.error:
+            self._status.showMessage(f"Error: {self._worker.error}")
+            return
+
+        self._grid_points = self._worker.grid_points
+        self._result_map  = self._worker.result_map
         self._width       = self._worker_width
         self._height      = self._worker_height
 
         self._contour_canvas.draw_contours(
-            grid_points, result_map, self._width, self._height
+            self._grid_points, self._result_map, self._width, self._height
         )
         self._status.showMessage(
-            f"Calculated {len(grid_points)} points in {elapsed:.2f} s"
+            f"Calculated {len(self._grid_points)} points in {self._worker.elapsed:.2f} s"
         )
 
     # ------------------------------------------------------------------
