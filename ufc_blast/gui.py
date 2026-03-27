@@ -157,16 +157,17 @@ class ContourCanvas(FigureCanvas):
         self._result_map = result_map
         self._click_marker = None
 
+        import matplotlib.patches as mpatches
+
         X, Y, Pr = _build_meshgrid(grid_points, result_map)
 
+        fig = self.figure
+
+        # Full clear: remove old axes (including colorbar axes) and recreate
+        fig.clear()
+        self.ax = fig.add_subplot(111)
         ax = self.ax
-
-        # Remove old colorbar before clearing axes
-        if self._colorbar is not None:
-            self._colorbar.remove()
-            self._colorbar = None
-
-        ax.cla()
+        self._colorbar = None
 
         # Filled contours
         cf = ax.contourf(X, Y, Pr, levels=15, cmap="YlOrRd", zorder=1)
@@ -175,33 +176,32 @@ class ContourCanvas(FigureCanvas):
         cs = ax.contour(X, Y, Pr, levels=10, colors="black", linewidths=0.8, zorder=2)
         ax.clabel(cs, inline=True, fontsize=7, fmt="%.0f kPa")
 
-        # Colorbar (stored for removal on next redraw)
-        self._colorbar = ax.get_figure().colorbar(cf, ax=ax, fraction=0.046, pad=0.04)
+        # Colorbar
+        self._colorbar = fig.colorbar(cf, ax=ax, fraction=0.046, pad=0.04)
         self._colorbar.set_label("Pr_α (kPa)", fontsize=9)
 
         # Building outline
         half_w = width / 2.0
         half_h = height / 2.0
-        rect = ax.add_patch(
-            __import__("matplotlib.patches", fromlist=["Rectangle"]).Rectangle(
-                (-half_w, -half_h),
-                width,
-                height,
-                linewidth=2,
-                edgecolor="black",
-                facecolor="none",
-                zorder=3,
-            )
-        )
+        ax.add_patch(mpatches.Rectangle(
+            (-half_w, -half_h), width, height,
+            linewidth=2, edgecolor="black", facecolor="none", zorder=3,
+        ))
 
         # Perpendicular centre marker
-        ax.plot(0.0, 0.0, "ko", markersize=6, zorder=4, label="Perpendicular pt.")
+        ax.plot(0.0, 0.0, "ko", markersize=6, zorder=4)
+
+        # Clip view to building bounds with small margin
+        margin = max(width, height) * 0.1
+        ax.set_xlim(-half_w - margin, half_w + margin)
+        ax.set_ylim(-half_h - margin, half_h + margin)
 
         ax.set_xlabel("Horizontal offset (m)", fontsize=9)
         ax.set_ylabel("Vertical offset (m)", fontsize=9)
         ax.set_title("Reflected peak overpressure Pr_α (kPa)", fontsize=10)
         ax.set_aspect("equal", adjustable="box")
 
+        fig.tight_layout()
         self.draw()
 
     def highlight_point(self, dx: float, dy: float) -> None:
