@@ -34,10 +34,12 @@ jobs:
         run: pyinstaller ufc_blast.spec
 
       - name: Smoke test — CLI point command
+        timeout-minutes: 2
         run: |
           dist\ufc-blast\ufc-blast.exe point --W 200 --R 30 --Hc 5 --alpha 0
 
       - name: Smoke test — GUI import check
+        timeout-minutes: 2
         run: |
           dist\ufc-blast\ufc-blast.exe gui-check
 
