@@ -187,6 +187,20 @@ def _cmd_compute(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_gui_check(_args: argparse.Namespace) -> int:
+    """Headless smoke test: import GUI deps, load tables, run one facade."""
+    import os
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg  # noqa: F401
+    from matplotlib.figure import Figure  # noqa: F401
+    from PySide6.QtWidgets import QApplication  # noqa: F401
+    from ufc_blast.core.blast_params import load_ufc_tables, compute_facade
+    load_ufc_tables()
+    result = compute_facade(R=30.0, W=200.0, Hc=5.0, width=4.0, height=4.0, step=2.0)
+    print(f"GUI check OK: {result.burst_type}, {len(result.grid_points)} points")
+    return 0
+
+
 def _cmd_gui(args: argparse.Namespace) -> int:
     try:
         from ufc_blast.gui import launch_gui
@@ -295,6 +309,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_gui.add_argument("--step", type=float, default=1.0, metavar="m",
                        help="Grid spacing (m, default: 1.0).")
     p_gui.set_defaults(func=_cmd_gui)
+
+    # ------------------------------------------------------------------
+    # gui-check (headless smoke test for CI)
+    # ------------------------------------------------------------------
+    p_check = sub.add_parser(
+        "gui-check",
+        help="Verify GUI dependencies load correctly (CI smoke test).",
+    )
+    p_check.set_defaults(func=_cmd_gui_check)
 
     return parser
 

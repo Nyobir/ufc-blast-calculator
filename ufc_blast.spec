@@ -34,6 +34,9 @@ a = Analysis(
         "ufc_blast.core.blast_params",
         "ufc_blast.core.geometry",
         "ufc_blast.core.interpolation",
+        # matplotlib Qt backend — imported at runtime, invisible to PyInstaller
+        "matplotlib.backends.backend_qtagg",
+        "matplotlib.backends.backend_agg",
     ] + collect_submodules("PySide6"),
     hookspath=[],
     hooksconfig={},

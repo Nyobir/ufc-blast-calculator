@@ -33,9 +33,13 @@ jobs:
       - name: Build EXE
         run: pyinstaller ufc_blast.spec
 
-      - name: Smoke test — exe starts and prints help
+      - name: Smoke test — CLI point command
         run: |
           dist\ufc-blast.exe point --W 200 --R 30 --Hc 5 --alpha 0
+
+      - name: Smoke test — GUI import check
+        run: |
+          dist\ufc-blast.exe gui-check
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
