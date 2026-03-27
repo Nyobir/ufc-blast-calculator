@@ -22,20 +22,13 @@ from typing import Any
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _scaled_hob(Hc: float, W: float) -> float:
-    return Hc / (W ** (1.0 / 3.0))
-
-
-def _check_hob(Hc: float, W: float) -> None:
-    """Print a warning (but do not abort) when the scaled HOB is borderline."""
-    hob = _scaled_hob(Hc, W)
-    if hob <= 0.397:
-        print(
-            f"WARNING: Scaled height-of-burst Hc/W^(1/3) = {hob:.4f} does not "
-            f"exceed 0.397 — charge is at or below surface-burst threshold. "
-            f"UFC 3-340-02 air-burst charts are not applicable.",
-            file=sys.stderr,
-        )
+def _detect_burst_type(Hc: float, W: float) -> str:
+    """Detect burst type and print it."""
+    from ufc_blast.core.geometry import determine_burst_type
+    burst_type, scaled_hob = determine_burst_type(Hc, W)
+    label = "Air burst" if burst_type == "air" else "Surface burst"
+    print(f"  Burst type: {label} (Hc/W^(1/3) = {scaled_hob:.4f})")
+    return burst_type
 
 
 def _r_alpha_from_angle(R: float, alpha_deg: float) -> float:
@@ -142,11 +135,11 @@ def _cmd_point(args: argparse.Namespace) -> int:
     from ufc_blast.core.blast_params import compute_point, load_ufc_tables
 
     load_ufc_tables()
-    _check_hob(args.Hc, args.W)
+    burst_type = _detect_burst_type(args.Hc, args.W)
 
     R_alpha = _r_alpha_from_angle(args.R, args.alpha)
     try:
-        result = compute_point(R_alpha, args.alpha, args.W)
+        result = compute_point(R_alpha, args.alpha, args.W, burst_type=burst_type)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -160,6 +153,7 @@ def _cmd_compute(args: argparse.Namespace) -> int:
     from ufc_blast.core.geometry import generate_grid
 
     load_ufc_tables()
+    burst_type = _detect_burst_type(args.Hc, args.W)
 
     try:
         grid = generate_grid(
@@ -178,7 +172,7 @@ def _cmd_compute(args: argparse.Namespace) -> int:
     errors = 0
     for gp in grid:
         try:
-            result = compute_point(gp.R_alpha, gp.alpha_deg, args.W)
+            result = compute_point(gp.R_alpha, gp.alpha_deg, args.W, burst_type=burst_type)
             rows.append(_result_to_dict(gp, result))
         except Exception as exc:
             errors += 1
