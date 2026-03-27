@@ -3,6 +3,7 @@
 
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -11,6 +12,9 @@ DATA_DIR = ROOT / "data" / "free_air"
 
 # Collect all CSV data files
 data_files = [(str(f), str(Path("data") / "free_air")) for f in DATA_DIR.glob("*.csv")]
+
+# PySide6 Qt plugins (platforms, styles, imageformats) are needed at runtime
+data_files += collect_data_files("PySide6", includes=["plugins/**/*"])
 
 a = Analysis(
     [str(ROOT / "ufc_blast" / "__main__.py")],
@@ -25,7 +29,7 @@ a = Analysis(
         "ufc_blast.core.blast_params",
         "ufc_blast.core.geometry",
         "ufc_blast.core.interpolation",
-    ],
+    ] + collect_submodules("PySide6"),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

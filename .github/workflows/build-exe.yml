@@ -6,6 +6,9 @@ on:
       - "v*"
   workflow_dispatch:  # manual trigger
 
+permissions:
+  contents: write  # needed for creating releases
+
 jobs:
   build:
     runs-on: windows-latest
@@ -16,6 +19,10 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Install Visual C++ Redistributable
+        run: |
+          choco install vcredist-all -y
+
       - name: Install dependencies
         run: |
           pip install --upgrade pip
@@ -23,6 +30,10 @@ jobs:
 
       - name: Build EXE
         run: pyinstaller ufc_blast.spec
+
+      - name: Smoke test — exe starts and prints help
+        run: |
+          dist\ufc-blast.exe point --W 200 --R 30 --Hc 5 --alpha 0
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
