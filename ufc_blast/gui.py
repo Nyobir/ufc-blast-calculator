@@ -132,6 +132,7 @@ class ContourCanvas(FigureCanvas):
 
         # State set after the first draw
         self._click_marker = None
+        self._colorbar = None
         self._grid_points: list[GridPoint] = []
         self._result_map: dict[tuple[float, float], BlastPointResult] = {}
         # Callback invoked with the nearest GridPoint when user clicks
@@ -158,6 +159,12 @@ class ContourCanvas(FigureCanvas):
         X, Y, Pr = _build_meshgrid(grid_points, result_map)
 
         ax = self.ax
+
+        # Remove old colorbar before clearing axes
+        if self._colorbar is not None:
+            self._colorbar.remove()
+            self._colorbar = None
+
         ax.cla()
 
         # Filled contours
@@ -167,9 +174,9 @@ class ContourCanvas(FigureCanvas):
         cs = ax.contour(X, Y, Pr, levels=10, colors="black", linewidths=0.8, zorder=2)
         ax.clabel(cs, inline=True, fontsize=7, fmt="%.0f kPa")
 
-        # Colorbar
-        cbar = ax.get_figure().colorbar(cf, ax=ax, fraction=0.046, pad=0.04)
-        cbar.set_label("Pr_α (kPa)", fontsize=9)
+        # Colorbar (stored for removal on next redraw)
+        self._colorbar = ax.get_figure().colorbar(cf, ax=ax, fraction=0.046, pad=0.04)
+        self._colorbar.set_label("Pr_α (kPa)", fontsize=9)
 
         # Building outline
         half_w = width / 2.0
