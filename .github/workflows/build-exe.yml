@@ -23,10 +23,12 @@ jobs:
         run: |
           choco install vcredist-all -y
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install numpy scipy matplotlib pyside6 pyinstaller
+          uv pip install --system numpy scipy matplotlib pyside6 pyinstaller
 
       - name: Build EXE
         run: pyinstaller ufc_blast.spec

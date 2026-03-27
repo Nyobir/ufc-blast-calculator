@@ -2,7 +2,7 @@
 Interpolation engine for UFC 3-340-02 blast parameter tables.
 
 Supports 1D log-log or linear interpolation (Table1D) and 2D bivariate
-interpolation over a (Ps0, angle) grid (Table2D).
+interpolation over a (family, x) grid (Table2D).
 """
 
 from __future__ import annotations
@@ -135,28 +135,28 @@ class Table1D:
 
 @dataclass
 class Table2D:
-    """2D lookup table over a (Ps0, angle) grid.
+    """Generic 2D lookup table over a (family, x) grid.
 
-    The angle axis always uses linear interpolation.  The Ps0 axis uses
+    The x axis always uses linear interpolation.  The family axis uses
     log or linear interpolation depending on *method* passed to
     :meth:`lookup`.
 
     Parameters
     ----------
-    ps0_levels : np.ndarray
-        Sorted unique Ps0 values present in the table (kPa).
-    angle_tables : dict[float, Table1D]
-        Mapping from each Ps0 level to a :class:`Table1D` keyed on angle
-        (degrees) → value.
+    family_levels : np.ndarray
+        Sorted unique family-parameter values (e.g. Ps0 levels, Hc/W^⅓).
+    x_tables : dict[float, Table1D]
+        Mapping from each family level to a :class:`Table1D` keyed on the
+        x variable → value.
     """
 
-    ps0_levels: np.ndarray
-    angle_tables: dict = field(default_factory=dict)  # float -> Table1D
+    family_levels: np.ndarray
+    x_tables: dict = field(default_factory=dict)  # float -> Table1D
 
     def __post_init__(self) -> None:
-        self.ps0_levels = np.asarray(self.ps0_levels, dtype=float)
-        if not np.all(np.diff(self.ps0_levels) > 0):
-            raise ValueError("ps0_levels must be strictly ascending")
+        self.family_levels = np.asarray(self.family_levels, dtype=float)
+        if not np.all(np.diff(self.family_levels) > 0):
+            raise ValueError("family_levels must be strictly ascending")
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -166,8 +166,8 @@ class Table2D:
     def from_csv(
         cls,
         path: str,
-        ps0_col: str,
-        angle_col: str,
+        family_col: str,
+        x_col: str,
         value_col: str,
     ) -> "Table2D":
         """Load a Table2D from a long-format CSV file.
@@ -176,10 +176,12 @@ class Table2D:
         ----------
         path : str
             Path to the CSV file.
-        ps0_col : str
-            Column name for Ps0 values.
-        angle_col : str
-            Column name for angle values (degrees).
+        family_col : str
+            Column name for the family parameter (e.g. ``ps0_kpa``,
+            ``hc_scaled_m_kg13``).
+        x_col : str
+            Column name for the x (lookup) variable (e.g. ``angle_deg``,
+            ``rg_scaled_m_kg13``).
         value_col : str
             Column name for the interpolated quantity.
         """
@@ -187,47 +189,47 @@ class Table2D:
             reader = csv.DictReader(fh)
             rows = list(reader)
 
-        # Group rows by ps0 level
+        # Group rows by family level
         groups: dict[float, list[tuple[float, float]]] = {}
         for r in rows:
-            ps0 = float(r[ps0_col])
-            angle = float(r[angle_col])
+            family = float(r[family_col])
+            x = float(r[x_col])
             value = float(r[value_col])
-            groups.setdefault(ps0, []).append((angle, value))
+            groups.setdefault(family, []).append((x, value))
 
-        ps0_levels = np.sort(np.array(list(groups.keys())))
+        family_levels = np.sort(np.array(list(groups.keys())))
 
-        angle_tables: dict[float, Table1D] = {}
-        for ps0 in ps0_levels:
-            pairs = sorted(groups[float(ps0)], key=lambda t: t[0])
-            angles = np.array([p[0] for p in pairs])
+        x_tables: dict[float, Table1D] = {}
+        for fam in family_levels:
+            pairs = sorted(groups[float(fam)], key=lambda t: t[0])
+            xs = np.array([p[0] for p in pairs])
             values = np.array([p[1] for p in pairs])
-            angle_tables[float(ps0)] = Table1D(x=angles, y=values)
+            x_tables[float(fam)] = Table1D(x=xs, y=values)
 
-        return cls(ps0_levels=ps0_levels, angle_tables=angle_tables)
+        return cls(family_levels=family_levels, x_tables=x_tables)
 
     # ------------------------------------------------------------------
     # Lookup
     # ------------------------------------------------------------------
 
-    def lookup(self, angle: float, ps0: float, method: str = "log") -> float:
+    def lookup(self, x: float, family: float, method: str = "log") -> float:
         """Bivariate interpolation.
 
-        The angle axis is always linearly interpolated.  The Ps0 axis is
+        The *x* axis is always linearly interpolated.  The *family* axis is
         interpolated in log space when ``method='log'`` and in linear
         space when ``method='linear'``.
 
-        Angle is clamped to the available range with a warning if it falls
-        outside.  Ps0 outside the table range raises :class:`ValueError`.
+        *x* is clamped to the available range with a warning if it falls
+        outside.  *family* outside the table range raises :class:`ValueError`.
 
         Parameters
         ----------
-        angle : float
-            Angle of incidence (degrees).
-        ps0 : float
-            Peak incident overpressure (kPa).
+        x : float
+            Lookup variable (e.g. angle in degrees, scaled range).
+        family : float
+            Family parameter (e.g. Ps0 in kPa, scaled Hc).
         method : str
-            Interpolation method for the Ps0 axis (``'log'`` or ``'linear'``).
+            Interpolation method for the family axis (``'log'`` or ``'linear'``).
 
         Returns
         -------
@@ -237,120 +239,113 @@ class Table2D:
         Raises
         ------
         ValueError
-            If *ps0* is outside the table range.
+            If *family* is outside the table range.
         """
-        ps0_min, ps0_max = self.ps0_levels[0], self.ps0_levels[-1]
-        if ps0 < ps0_min or ps0 > ps0_max:
+        fam_min, fam_max = self.family_levels[0], self.family_levels[-1]
+        if family < fam_min or family > fam_max:
             raise ValueError(
-                f"ps0={ps0} is outside table range [{ps0_min}, {ps0_max}]"
+                f"family={family} is outside table range [{fam_min}, {fam_max}]"
             )
 
-        # Determine angle bounds across all ps0 slices for clamping
-        all_angle_mins = [tbl.x[0] for tbl in self.angle_tables.values()]
-        all_angle_maxs = [tbl.x[-1] for tbl in self.angle_tables.values()]
-        angle_min = max(all_angle_mins)  # conservative: highest lower bound
-        angle_max = min(all_angle_maxs)  # conservative: lowest upper bound
+        # Determine x bounds across all family slices for clamping
+        all_x_mins = [tbl.x[0] for tbl in self.x_tables.values()]
+        all_x_maxs = [tbl.x[-1] for tbl in self.x_tables.values()]
+        x_min = max(all_x_mins)  # conservative: highest lower bound
+        x_max = min(all_x_maxs)  # conservative: lowest upper bound
 
-        if angle < angle_min:
+        if x < x_min:
             warnings.warn(
-                f"angle={angle} below table minimum {angle_min}; clamping.",
+                f"x={x} below table minimum {x_min}; clamping.",
                 UserWarning,
                 stacklevel=2,
             )
-            angle = angle_min
-        elif angle > angle_max:
+            x = x_min
+        elif x > x_max:
             warnings.warn(
-                f"angle={angle} above table maximum {angle_max}; clamping.",
+                f"x={x} above table maximum {x_max}; clamping.",
                 UserWarning,
                 stacklevel=2,
             )
-            angle = angle_max
+            x = x_max
 
-        # Find bracketing ps0 levels
-        idx = np.searchsorted(self.ps0_levels, ps0)
+        # Find bracketing family levels
+        idx = np.searchsorted(self.family_levels, family)
 
         if idx == 0:
-            # Exact match at lower boundary
-            return self.angle_tables[float(self.ps0_levels[0])].lookup(angle, method="linear")
+            return self.x_tables[float(self.family_levels[0])].lookup(x, method="linear")
 
-        if idx == len(self.ps0_levels):
-            # Exact match at upper boundary
-            return self.angle_tables[float(self.ps0_levels[-1])].lookup(angle, method="linear")
+        if idx == len(self.family_levels):
+            return self.x_tables[float(self.family_levels[-1])].lookup(x, method="linear")
 
-        ps0_lo = float(self.ps0_levels[idx - 1])
-        ps0_hi = float(self.ps0_levels[idx])
+        fam_lo = float(self.family_levels[idx - 1])
+        fam_hi = float(self.family_levels[idx])
 
-        val_lo = self.angle_tables[ps0_lo].lookup(angle, method="linear")
-        val_hi = self.angle_tables[ps0_hi].lookup(angle, method="linear")
+        val_lo = self.x_tables[fam_lo].lookup(x, method="linear")
+        val_hi = self.x_tables[fam_hi].lookup(x, method="linear")
 
         if method == "log":
-            # Log-linear interpolation on the Ps0 axis
-            t = (np.log(ps0) - np.log(ps0_lo)) / (np.log(ps0_hi) - np.log(ps0_lo))
+            t = (np.log(family) - np.log(fam_lo)) / (np.log(fam_hi) - np.log(fam_lo))
             return float(np.exp((1 - t) * np.log(val_lo) + t * np.log(val_hi)))
         elif method == "linear":
-            t = (ps0 - ps0_lo) / (ps0_hi - ps0_lo)
+            t = (family - fam_lo) / (fam_hi - fam_lo)
             return float((1 - t) * val_lo + t * val_hi)
         else:
             raise ValueError(f"Unknown method '{method}'. Use 'log' or 'linear'.")
 
     def lookup_batch(
-        self, angles: np.ndarray, ps0s: np.ndarray, method: str = "log"
+        self, xs: np.ndarray, families: np.ndarray, method: str = "log"
     ) -> np.ndarray:
-        """Vectorized bivariate interpolation for arrays of (angle, ps0).
+        """Vectorized bivariate interpolation for arrays of (x, family).
 
         Parameters
         ----------
-        angles : np.ndarray
-            Angles of incidence (degrees).
-        ps0s : np.ndarray
-            Peak incident overpressures (kPa).
+        xs : np.ndarray
+            X-axis query points.
+        families : np.ndarray
+            Family-axis query points.
         method : str
-            ``'log'`` or ``'linear'`` for the Ps0 axis.
+            ``'log'`` or ``'linear'`` for the family axis.
 
         Returns
         -------
         np.ndarray
             Interpolated values, same shape as inputs.
         """
-        angles = np.asarray(angles, dtype=float)
-        ps0s = np.asarray(ps0s, dtype=float)
-        result = np.empty_like(angles)
+        xs = np.asarray(xs, dtype=float)
+        families = np.asarray(families, dtype=float)
+        result = np.empty_like(xs)
 
-        # Clamp angles to safe range
-        all_angle_maxs = [tbl.x[-1] for tbl in self.angle_tables.values()]
-        angle_max = min(all_angle_maxs)
-        angles_clamped = np.clip(angles, 0.0, angle_max)
+        # Clamp x values to safe range
+        all_x_maxs = [tbl.x[-1] for tbl in self.x_tables.values()]
+        x_max = min(all_x_maxs)
+        xs_clamped = np.clip(xs, 0.0, x_max)
 
-        # Find bracketing ps0 indices for all points at once
-        idxs = np.searchsorted(self.ps0_levels, ps0s)
-        idxs = np.clip(idxs, 1, len(self.ps0_levels) - 1)
+        # Find bracketing family indices for all points at once
+        idxs = np.searchsorted(self.family_levels, families)
+        idxs = np.clip(idxs, 1, len(self.family_levels) - 1)
 
-        ps0_lo_arr = self.ps0_levels[idxs - 1]
-        ps0_hi_arr = self.ps0_levels[idxs]
-
-        # Look up values at lo and hi ps0 for each point
-        # Group by (ps0_lo, ps0_hi) pair for efficiency
-        for lo_idx in range(len(self.ps0_levels) - 1):
+        # Group by (fam_lo, fam_hi) pair for efficiency
+        for lo_idx in range(len(self.family_levels) - 1):
             hi_idx = lo_idx + 1
             mask = idxs == hi_idx
             if not np.any(mask):
                 continue
 
-            ps0_lo = float(self.ps0_levels[lo_idx])
-            ps0_hi = float(self.ps0_levels[hi_idx])
-            tbl_lo = self.angle_tables[ps0_lo]
-            tbl_hi = self.angle_tables[ps0_hi]
+            fam_lo = float(self.family_levels[lo_idx])
+            fam_hi = float(self.family_levels[hi_idx])
+            tbl_lo = self.x_tables[fam_lo]
+            tbl_hi = self.x_tables[fam_hi]
 
-            a_sub = angles_clamped[mask]
-            val_lo = tbl_lo.lookup_batch(a_sub, method="linear")
-            val_hi = tbl_hi.lookup_batch(a_sub, method="linear")
+            x_sub = xs_clamped[mask]
+            val_lo = tbl_lo.lookup_batch(x_sub, method="linear")
+            val_hi = tbl_hi.lookup_batch(x_sub, method="linear")
 
-            ps0_sub = ps0s[mask]
+            fam_sub = families[mask]
             if method == "log":
-                t = (np.log(ps0_sub) - np.log(ps0_lo)) / (np.log(ps0_hi) - np.log(ps0_lo))
+                t = (np.log(fam_sub) - np.log(fam_lo)) / (np.log(fam_hi) - np.log(fam_lo))
                 result[mask] = np.exp((1 - t) * np.log(val_lo) + t * np.log(val_hi))
             else:
-                t = (ps0_sub - ps0_lo) / (ps0_hi - ps0_lo)
+                t = (fam_sub - fam_lo) / (fam_hi - fam_lo)
                 result[mask] = (1 - t) * val_lo + t * val_hi
 
         return result

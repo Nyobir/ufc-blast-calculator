@@ -49,7 +49,7 @@ class TestComputeFacadeAirBurst:
             assert isinstance(facade.result_map[key], BlastPointResult)
 
     def test_mach_curve_present(self):
-        """Air burst should produce a Mach curve (with placeholder data)."""
+        """Air burst should produce a Mach curve."""
         facade = compute_facade(**AIR_PARAMS)
         assert isinstance(facade.mach_curve, list)
         # Mach curve entries are (dx, mach_dy) tuples

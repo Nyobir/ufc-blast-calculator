@@ -145,7 +145,7 @@ class ContourCanvas(FigureCanvas):
     """Matplotlib canvas that draws the 2-D Pr_alpha contour map."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        fig = Figure(tight_layout=True)
+        fig = Figure()
         self.ax = fig.add_subplot(111)
         super().__init__(fig)
         self.setParent(parent)
@@ -190,69 +190,30 @@ class ContourCanvas(FigureCanvas):
 
         vmin, vmax = float(np.nanmin(Pr)), float(np.nanmax(Pr))
 
-        has_mach = mach_curve is not None and len(mach_curve) > 0
+        # Single contourf for the entire grid — Mach zone values are already
+        # uniform per column (set by compute_facade), so contourf naturally
+        # flattens in that region without needing a separate plot type.
+        cf = ax.contourf(X, Y, Pr, levels=15, cmap="YlOrRd", zorder=1)
+        cs = ax.contour(X, Y, Pr, levels=10, colors="black", linewidths=0.8, zorder=2)
+        ax.clabel(cs, inline=True, fontsize=7, fmt="%.0f kPa")
+        self._colorbar = fig.colorbar(cf, ax=ax, fraction=0.046, pad=0.04)
+        self._colorbar.set_label("Pr_α (kPa)", fontsize=9)
 
-        if has_mach:
-            # Build a per-cell Mach height lookup
-            mach_dict = {dx: mach_dy for dx, mach_dy in mach_curve}
-
-            # Create masked arrays: above and below the Mach line
-            Pr_above = Pr.copy()
-            Pr_below = Pr.copy()
-
-            dx_vals = sorted({gp.dx for gp in grid_points})
-            dy_vals = sorted({gp.dy for gp in grid_points})
-
-            for j, dy in enumerate(dy_vals):
-                for i, dx in enumerate(dx_vals):
-                    if dx in mach_dict:
-                        if dy < mach_dict[dx]:
-                            Pr_above[j, i] = np.nan  # mask from contourf
-                        else:
-                            Pr_below[j, i] = np.nan  # mask from pcolormesh
-
-            # Upper zone: contourf (rings)
-            cf = ax.contourf(X, Y, Pr_above, levels=15, cmap="YlOrRd",
-                             vmin=vmin, vmax=vmax, zorder=1)
-            cs = ax.contour(X, Y, Pr_above, levels=10, colors="black",
-                            linewidths=0.8, zorder=2)
-            ax.clabel(cs, inline=True, fontsize=7, fmt="%.0f kPa")
-
-            # Lower zone: pcolormesh (flat bands)
-            ax.pcolormesh(X, Y, Pr_below, cmap="YlOrRd",
-                          vmin=vmin, vmax=vmax, zorder=1, shading="nearest")
-
-            # Mach curve
+        # Mach stem boundary line (thin dashed overlay)
+        if mach_curve is not None and len(mach_curve) > 0:
             mach_xs = [dx for dx, _ in mach_curve]
             mach_ys = [dy for _, dy in mach_curve]
-            ax.plot(mach_xs, mach_ys, "k-", linewidth=2.5, zorder=3, label="Mach stem")
-
-            # Colorbar from contourf
-            self._colorbar = fig.colorbar(cf, ax=ax, fraction=0.046, pad=0.04)
-            self._colorbar.set_label("Pr_α (kPa)", fontsize=9)
-        else:
-            # No Mach stem: pure contourf (surface burst or Mach below facade)
-            cf = ax.contourf(X, Y, Pr, levels=15, cmap="YlOrRd", zorder=1)
-            cs = ax.contour(X, Y, Pr, levels=10, colors="black", linewidths=0.8, zorder=2)
-            ax.clabel(cs, inline=True, fontsize=7, fmt="%.0f kPa")
-            self._colorbar = fig.colorbar(cf, ax=ax, fraction=0.046, pad=0.04)
-            self._colorbar.set_label("Pr_α (kPa)", fontsize=9)
-
-        # Building outline
-        half_w = width / 2.0
-        half_h = height / 2.0
-        ax.add_patch(mpatches.Rectangle(
-            (-half_w, -half_h), width, height,
-            linewidth=2, edgecolor="black", facecolor="none", zorder=4,
-        ))
+            ax.plot(mach_xs, mach_ys, color="white", linewidth=2.0,
+                    linestyle="--", zorder=3, label="Mach stem")
 
         # Perpendicular centre marker
         ax.plot(0.0, 0.0, "ko", markersize=6, zorder=5)
 
-        # Clip view to building bounds with small margin
-        margin = max(width, height) * 0.1
-        ax.set_xlim(-half_w - margin, half_w + margin)
-        ax.set_ylim(-half_h - margin, half_h + margin)
+        # Clip view to data bounds (no margin — avoids visible contourf edge)
+        half_w = width / 2.0
+        half_h = height / 2.0
+        ax.set_xlim(-half_w, half_w)
+        ax.set_ylim(-half_h, half_h)
 
         ax.set_xlabel("Horizontal offset (m)", fontsize=9)
         ax.set_ylabel("Vertical offset (m)", fontsize=9)
@@ -311,7 +272,7 @@ class FriedlanderPanel(QWidget):
         layout.setSpacing(4)
 
         # --- Waveform canvas ---
-        fig = Figure(tight_layout=True)
+        fig = Figure()
         self._ax = fig.add_subplot(111)
         self._canvas = FigureCanvas(fig)
         self._canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -416,6 +377,7 @@ class FriedlanderPanel(QWidget):
             fontsize=9,
         )
         ax.grid(True, alpha=0.25)
+        self._canvas.figure.tight_layout()
 
         # Reset hover elements
         self._vline = None
@@ -627,6 +589,18 @@ class BlastWindow(QMainWindow):
 
         if self._worker.error:
             self._status.showMessage(f"Error: {self._worker.error}")
+            # Clear the contour plot and show error message
+            fig = self._contour_canvas.figure
+            fig.clear()
+            ax = fig.add_subplot(111)
+            ax.text(0.5, 0.5, self._worker.error,
+                    transform=ax.transAxes, ha="center", va="center",
+                    fontsize=11, color="red", wrap=True,
+                    bbox=dict(boxstyle="round,pad=0.5", fc="#fff0f0", ec="red"))
+            ax.set_axis_off()
+            fig.tight_layout()
+            self._contour_canvas.draw()
+            self._burst_type_label.setText("")
             return
 
         facade = self._worker.facade

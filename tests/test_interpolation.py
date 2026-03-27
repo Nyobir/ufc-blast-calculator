@@ -142,16 +142,16 @@ class TestTable2DFromCSV:
     """Loading and structural sanity checks for calpha."""
 
     def test_loads_calpha_csv(self):
-        tbl = Table2D.from_csv(CALPHA_CSV, "ps0_kpa", "angle_deg", "calpha")
-        assert len(tbl.ps0_levels) == 20
+        tbl = Table2D.from_csv(CALPHA_CSV, family_col="ps0_kpa", x_col="angle_deg", value_col="calpha")
+        assert len(tbl.family_levels) == 20
 
-    def test_ps0_levels_sorted(self):
-        tbl = Table2D.from_csv(CALPHA_CSV, "ps0_kpa", "angle_deg", "calpha")
-        assert np.all(np.diff(tbl.ps0_levels) > 0)
+    def test_family_levels_sorted(self):
+        tbl = Table2D.from_csv(CALPHA_CSV, family_col="ps0_kpa", x_col="angle_deg", value_col="calpha")
+        assert np.all(np.diff(tbl.family_levels) > 0)
 
     def test_loads_iralpha_csv(self):
-        tbl = Table2D.from_csv(IRALPHA_CSV, "ps0_kpa", "angle_deg", "iralpha_kpa_ms_kg13")
-        assert len(tbl.ps0_levels) > 0
+        tbl = Table2D.from_csv(IRALPHA_CSV, family_col="ps0_kpa", x_col="angle_deg", value_col="iralpha_kpa_ms_kg13")
+        assert len(tbl.family_levels) > 0
 
 
 class TestTable2DLookup:
@@ -159,20 +159,20 @@ class TestTable2DLookup:
 
     @pytest.fixture(scope="class")
     def calpha(self):
-        return Table2D.from_csv(CALPHA_CSV, "ps0_kpa", "angle_deg", "calpha")
+        return Table2D.from_csv(CALPHA_CSV, family_col="ps0_kpa", x_col="angle_deg", value_col="calpha")
 
     # --- Known corner values from figure 2-193 ---
 
     def test_calpha_angle0_low_ps0_approx_2(self, calpha):
         """At angle=0 and low pressure, calpha ≈ 2.0 (near-normal reflection)."""
-        result = calpha.lookup(angle=0.0, ps0=1.378952)
+        result = calpha.lookup(x=0.0, family=1.378952)
         assert result == pytest.approx(1.9995, abs=0.01), (
             f"Expected ~2.0, got {result}"
         )
 
     def test_calpha_angle0_high_ps0_approx_12_24(self, calpha):
         """At angle=0 and very high pressure, calpha ≈ 12.24."""
-        result = calpha.lookup(angle=0.0, ps0=34473.8)
+        result = calpha.lookup(x=0.0, family=34473.8)
         assert result == pytest.approx(12.24, abs=0.05), (
             f"Expected ~12.24, got {result}"
         )
@@ -181,7 +181,7 @@ class TestTable2DLookup:
         """Reflection coefficient must decrease as angle of incidence increases."""
         ps0_mid = 344.74  # interior pressure level
         angles = [0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0]
-        values = [calpha.lookup(angle=a, ps0=ps0_mid) for a in angles]
+        values = [calpha.lookup(x=a, family=ps0_mid) for a in angles]
         # Allow for small numerical noise but expect a clear downward trend
         assert values[0] > values[-1], (
             "calpha at angle=0 should exceed calpha at angle=90"
@@ -199,9 +199,9 @@ class TestTable2DLookup:
         # Geometric midpoint in log space
         ps0_mid = np.exp((np.log(ps0_lo) + np.log(ps0_hi)) / 2.0)
 
-        val_lo = calpha.lookup(angle=0.0, ps0=ps0_lo)
-        val_hi = calpha.lookup(angle=0.0, ps0=ps0_hi)
-        val_mid = calpha.lookup(angle=0.0, ps0=ps0_mid)
+        val_lo = calpha.lookup(x=0.0, family=ps0_lo)
+        val_hi = calpha.lookup(x=0.0, family=ps0_hi)
+        val_mid = calpha.lookup(x=0.0, family=ps0_mid)
 
         lo, hi = min(val_lo, val_hi), max(val_lo, val_hi)
         assert lo <= val_mid <= hi, (
@@ -210,17 +210,17 @@ class TestTable2DLookup:
 
     def test_calpha_ps0_out_of_range_below_raises(self, calpha):
         with pytest.raises(ValueError, match="outside table range"):
-            calpha.lookup(angle=0.0, ps0=0.001)
+            calpha.lookup(x=0.0, family=0.001)
 
     def test_calpha_ps0_out_of_range_above_raises(self, calpha):
         with pytest.raises(ValueError, match="outside table range"):
-            calpha.lookup(angle=0.0, ps0=1e9)
+            calpha.lookup(x=0.0, family=1e9)
 
     def test_calpha_angle_clamped_with_warning(self, calpha):
         """Angle slightly out of range should warn and clamp, not raise."""
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            result = calpha.lookup(angle=95.0, ps0=1.378952)
+            result = calpha.lookup(x=95.0, family=1.378952)
             assert len(w) == 1
             assert issubclass(w[0].category, UserWarning)
             assert "clamping" in str(w[0].message).lower()
@@ -230,10 +230,10 @@ class TestTable2DLookup:
         """Lookup at an exact ps0 grid point should reproduce the table value."""
         ps0_exact = 137.8952  # exact level present in data (index 6)
         # Find the actual level
-        ps0_actual = calpha.ps0_levels[6]
-        angle_tbl = calpha.angle_tables[float(ps0_actual)]
-        y_expected = angle_tbl.lookup(0.0, method="linear")
-        result = calpha.lookup(angle=0.0, ps0=float(ps0_actual))
+        ps0_actual = calpha.family_levels[6]
+        x_tbl = calpha.x_tables[float(ps0_actual)]
+        y_expected = x_tbl.lookup(0.0, method="linear")
+        result = calpha.lookup(x=0.0, family=float(ps0_actual))
         assert result == pytest.approx(y_expected, rel=1e-6)
 
     def test_log_vs_linear_ps0_interpolation_differ(self, calpha):
@@ -242,6 +242,6 @@ class TestTable2DLookup:
         ps0_hi = 3.44738
         ps0_mid = (ps0_lo + ps0_hi) / 2.0  # arithmetic midpoint favours linear
 
-        result_log = calpha.lookup(angle=0.0, ps0=ps0_mid, method="log")
-        result_lin = calpha.lookup(angle=0.0, ps0=ps0_mid, method="linear")
+        result_log = calpha.lookup(x=0.0, family=ps0_mid, method="log")
+        result_lin = calpha.lookup(x=0.0, family=ps0_mid, method="linear")
         assert result_log != pytest.approx(result_lin, rel=1e-4)

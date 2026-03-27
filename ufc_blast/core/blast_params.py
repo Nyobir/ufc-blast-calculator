@@ -82,15 +82,15 @@ def load_ufc_tables() -> None:
     )
     _tables["calpha"] = Table2D.from_csv(
         DATA_DIR / "figure_2_193_calpha.csv",
-        "ps0_kpa",
-        "angle_deg",
-        "calpha",
+        family_col="ps0_kpa",
+        x_col="angle_deg",
+        value_col="calpha",
     )
     _tables["iralpha"] = Table2D.from_csv(
         DATA_DIR / "figure_2_194_iralpha.csv",
-        "ps0_kpa",
-        "angle_deg",
-        "iralpha_kpa_ms_kg13",
+        family_col="ps0_kpa",
+        x_col="angle_deg",
+        value_col="iralpha_kpa_ms_kg13",
     )
     _tables["t0"] = Table1D.from_csv(
         DATA_DIR / "figure_2_7_t0.csv",
@@ -123,9 +123,9 @@ def load_ufc_tables() -> None:
     # Triple point height table (Figure 2-13)
     _tables["triple_point"] = Table2D.from_csv(
         DATA_DIR / "figure_2_13_triple_point.csv",
-        "hc_scaled_m_kg13",
-        "rg_scaled_m_kg13",
-        "ht_scaled_m_kg13",
+        family_col="hc_scaled_m_kg13",
+        x_col="rg_scaled_m_kg13",
+        value_col="ht_scaled_m_kg13",
     )
 
 
@@ -161,11 +161,11 @@ def compute_point(R_alpha: float, alpha_deg: float, W: float, burst_type: str = 
     Ps0 = ps0_table.lookup(Z)
 
     # Reflection coefficient from Figure 2-193 (shared across burst types)
-    C_alpha = _tables["calpha"].lookup(angle=alpha_deg, ps0=Ps0)
+    C_alpha = _tables["calpha"].lookup(x=alpha_deg, family=Ps0)
     Pr_alpha = C_alpha * Ps0
 
     # Reflected specific impulse from Figure 2-194 (kPa·ms/kg^1/3 → kPa·s)
-    ir_alpha_scaled = _tables["iralpha"].lookup(angle=alpha_deg, ps0=Ps0)
+    ir_alpha_scaled = _tables["iralpha"].lookup(x=alpha_deg, family=Ps0)
     ir_alpha = ir_alpha_scaled * W_cbrt / 1000.0
 
     # Arrival time (ms/kg^1/3 → s)
@@ -234,10 +234,10 @@ def compute_points_batch(
     t0_vals = t0_table.lookup_batch(Z) * W_cbrt / 1000.0
 
     # Bulk 2D lookups
-    C_alpha = _tables["calpha"].lookup_batch(alpha_degs, Ps0)
+    C_alpha = _tables["calpha"].lookup_batch(xs=alpha_degs, families=Ps0)
     Pr_alpha = C_alpha * Ps0
 
-    ir_alpha_scaled = _tables["iralpha"].lookup_batch(alpha_degs, Ps0)
+    ir_alpha_scaled = _tables["iralpha"].lookup_batch(xs=alpha_degs, families=Ps0)
     ir_alpha = ir_alpha_scaled * W_cbrt / 1000.0
 
     # Friedlander b — vectorized Newton's method
@@ -373,7 +373,7 @@ class FacadeResult:
 
     burst_type: str
     scaled_hob: float
-    grid_points: list
+    grid_points: list  # list[GridPoint] from geometry module
     result_map: dict[tuple[float, float], BlastPointResult]
     mach_curve: list[tuple[float, float]]
 
@@ -418,6 +418,18 @@ def compute_facade(
         load_ufc_tables()
 
     burst_type, scaled_hob = determine_burst_type(Hc, W)
+
+    # Validate that scaled Hc falls within the triple point table range
+    # for air bursts (Mach stem correction requires this data)
+    if burst_type == "air":
+        triple_table = _tables["triple_point"]
+        max_hc_scaled = float(triple_table.family_levels[-1])
+        if scaled_hob > max_hc_scaled:
+            raise ValueError(
+                f"No data available: Hc/W^(1/3) = {scaled_hob:.3f} exceeds "
+                f"triple point table maximum ({max_hc_scaled:.3f} m/kg^(1/3)). "
+                f"Reduce Hc or increase W."
+            )
 
     grid_points = generate_grid(R, W, Hc, width=width, height=height, step=step)
 
@@ -508,7 +520,7 @@ def apply_mach_stem(
 
         # Look up triple point height
         try:
-            HT_scaled = triple_table.lookup(angle=Rg_scaled, ps0=Hc_scaled)
+            HT_scaled = triple_table.lookup(x=Rg_scaled, family=Hc_scaled)
         except (ValueError, KeyError):
             # Rg_scaled or Hc_scaled outside table range — no Mach stem here
             continue
