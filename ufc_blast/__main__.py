@@ -1,6 +1,14 @@
 """Allow running as `python -m ufc_blast`."""
 
+import io
 import sys
+
+# When frozen with console=False (windowed mode), sys.stdout/stderr may be
+# None.  Redirect them to devnull so that print() and argparse don't crash.
+if sys.stdout is None:
+    sys.stdout = io.StringIO()
+if sys.stderr is None:
+    sys.stderr = io.StringIO()
 
 
 def _run() -> None:

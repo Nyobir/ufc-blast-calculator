@@ -12,10 +12,26 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import math
 import sys
 from typing import Any
+
+
+# ---------------------------------------------------------------------------
+# Ensure stdout/stderr can handle Unicode on Windows console (cp1252, etc.)
+# ---------------------------------------------------------------------------
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(errors="replace")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +249,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="UFC 3-340-02 blast wave calculator for building facade analysis.",
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
-    sub.required = True
+    sub.required = False
 
     # ------------------------------------------------------------------
     # point
