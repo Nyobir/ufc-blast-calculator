@@ -32,6 +32,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QDoubleSpinBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -243,7 +244,7 @@ class ContourCanvas(FigureCanvas):
 # ---------------------------------------------------------------------------
 
 class FriedlanderPanel(QWidget):
-    """Right-side panel: Friedlander P(t) plot + blast parameter labels."""
+    """Right-side panel: Friedlander P(t) plot with hover crosshair + blast parameter grid."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -256,9 +257,17 @@ class FriedlanderPanel(QWidget):
         self._ax = fig.add_subplot(111)
         self._canvas = FigureCanvas(fig)
         self._canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout.addWidget(self._canvas)
+        layout.addWidget(self._canvas, stretch=1)
 
-        # --- Parameter labels ---
+        # Hover crosshair state
+        self._vline = None
+        self._hline = None
+        self._hover_annotation = None
+        self._t_data_ms = None  # time array in ms (for interpolation)
+        self._p_data = None     # pressure array in kPa
+        self._canvas.mpl_connect("motion_notify_event", self._on_hover)
+
+        # --- Placeholder label ---
         self._label_placeholder = QLabel(
             "Click on the facade to see blast parameters.",
             alignment=Qt.AlignCenter,
@@ -266,30 +275,48 @@ class FriedlanderPanel(QWidget):
         self._label_placeholder.setWordWrap(True)
         layout.addWidget(self._label_placeholder)
 
-        # Individual parameter label widgets (hidden until first click)
+        # --- Parameter grid (2 columns) ---
         self._param_labels: dict[str, QLabel] = {}
-        param_keys = [
-            ("coord",   "Point"),
-            ("R_alpha", "R_α"),
-            ("alpha",   "α"),
-            ("Ps0",     "Ps0"),
-            ("C_alpha", "C_α"),
-            ("Pr",      "Pr_α"),
-            ("ir",      "ir_α"),
-            ("tA",      "tA"),
-            ("t0",      "t0"),
+        # (key, display_label) — arranged in 2 columns
+        param_defs = [
+            # Column 0          Column 1
+            ("coord",   None),  # spans full width
+            ("R_alpha", "R_α"), ("alpha",   "α"),
+            ("Ps0",     "Ps0"), ("C_alpha", "C_α"),
+            ("Pr",      "Pr_α"),("ir",      "ir_α"),
+            ("tA",      "tA"),  ("t0",      "t0"),
             ("b",       "b"),
         ]
         self._param_widget = QWidget()
-        param_layout = QVBoxLayout(self._param_widget)
-        param_layout.setContentsMargins(0, 0, 0, 0)
-        param_layout.setSpacing(2)
-        for key, _ in param_keys:
-            lbl = QLabel()
-            lbl.setWordWrap(False)
-            lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            self._param_labels[key] = lbl
-            param_layout.addWidget(lbl)
+        grid = QGridLayout(self._param_widget)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(2)
+
+        # First row: coord spans both columns
+        lbl = QLabel()
+        lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._param_labels["coord"] = lbl
+        grid.addWidget(lbl, 0, 0, 1, 2)
+
+        # Remaining params in 2-column grid
+        pair_keys = [
+            ("R_alpha", "alpha"),
+            ("Ps0",     "C_alpha"),
+            ("Pr",      "ir"),
+            ("tA",      "t0"),
+            ("b",       None),
+        ]
+        for row_idx, (left_key, right_key) in enumerate(pair_keys, start=1):
+            lbl_l = QLabel()
+            lbl_l.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            self._param_labels[left_key] = lbl_l
+            grid.addWidget(lbl_l, row_idx, 0)
+            if right_key:
+                lbl_r = QLabel()
+                lbl_r.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                self._param_labels[right_key] = lbl_r
+                grid.addWidget(lbl_r, row_idx, 1)
+
         self._param_widget.hide()
         layout.addWidget(self._param_widget)
 
@@ -301,7 +328,6 @@ class FriedlanderPanel(QWidget):
         """Redraw the waveform and update all parameter labels."""
         self._draw_waveform(gp, res)
         self._update_labels(gp, res)
-
         self._label_placeholder.hide()
         self._param_widget.show()
 
@@ -317,9 +343,13 @@ class FriedlanderPanel(QWidget):
         t = np.linspace(0.0, t_end, 2000)
         P = friedlander(t, res.Pr_alpha, res.tA, res.t0, res.b)
 
-        ax.plot(t * 1e3, P, color="steelblue", linewidth=1.8)
+        # Store for hover interpolation
+        self._t_data_ms = t * 1e3
+        self._p_data = P
+
+        ax.plot(self._t_data_ms, P, color="steelblue", linewidth=1.8)
         ax.axhline(0.0, color="black", linewidth=0.8, linestyle="--")
-        ax.fill_between(t * 1e3, P, 0.0, where=(P > 0.0), alpha=0.2, color="steelblue")
+        ax.fill_between(self._t_data_ms, P, 0.0, where=(P > 0.0), alpha=0.2, color="steelblue")
         ax.set_xlabel("Time (ms)", fontsize=9)
         ax.set_ylabel("Reflected pressure (kPa)", fontsize=9)
         ax.set_title(
@@ -327,21 +357,64 @@ class FriedlanderPanel(QWidget):
             fontsize=9,
         )
         ax.grid(True, alpha=0.25)
+
+        # Reset hover elements
+        self._vline = None
+        self._hline = None
+        self._hover_annotation = None
+
         self._canvas.draw()
+
+    def _on_hover(self, event) -> None:
+        """Show crosshair + values on hover over the Friedlander plot."""
+        ax = self._ax
+        if event.inaxes is not ax or self._t_data_ms is None:
+            # Remove crosshair when outside axes
+            if self._vline is not None:
+                self._vline.set_visible(False)
+                self._hline.set_visible(False)
+                self._hover_annotation.set_visible(False)
+                self._canvas.draw_idle()
+            return
+
+        t_ms = event.xdata
+        # Interpolate pressure at cursor time
+        p_val = float(np.interp(t_ms, self._t_data_ms, self._p_data))
+
+        if self._vline is None:
+            self._vline = ax.axvline(t_ms, color="gray", linewidth=0.8, linestyle="--")
+            self._hline = ax.axhline(p_val, color="gray", linewidth=0.8, linestyle="--")
+            self._hover_annotation = ax.annotate(
+                "", xy=(t_ms, p_val),
+                xytext=(10, 10), textcoords="offset points",
+                fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.3", fc="lightyellow", ec="gray", alpha=0.9),
+            )
+        else:
+            self._vline.set_xdata([t_ms])
+            self._hline.set_ydata([p_val])
+            self._vline.set_visible(True)
+            self._hline.set_visible(True)
+            self._hover_annotation.set_visible(True)
+
+        self._hover_annotation.set_text(f"t = {t_ms:.2f} ms\nP = {p_val:.2f} kPa")
+        self._hover_annotation.xy = (t_ms, p_val)
+
+        self._canvas.draw_idle()
 
     def _update_labels(self, gp: GridPoint, res: BlastPointResult) -> None:
         self._param_labels["coord"].setText(
-            f"Point:   dx = {gp.dx:.2f} m,  dy = {gp.dy:.2f} m"
+            f"Point:  dx = {gp.dx:.2f} m,  dy = {gp.dy:.2f} m"
         )
-        self._param_labels["R_alpha"].setText(f"R_α  =  {gp.R_alpha:.3f} m")
-        self._param_labels["alpha"].setText(f"α     =  {gp.alpha_deg:.2f} °")
-        self._param_labels["Ps0"].setText(f"Ps0  =  {res.Ps0:.3f} kPa")
-        self._param_labels["C_alpha"].setText(f"C_α  =  {res.C_alpha:.4f}")
-        self._param_labels["Pr"].setText(f"Pr_α =  {res.Pr_alpha:.3f} kPa")
-        self._param_labels["ir"].setText(f"ir_α =  {res.ir_alpha:.6f} kPa·s")
-        self._param_labels["tA"].setText(f"tA   =  {res.tA*1e3:.4f} ms")
-        self._param_labels["t0"].setText(f"t0   =  {res.t0*1e3:.4f} ms")
-        self._param_labels["b"].setText(f"b    =  {res.b:.4f}")
+        self._param_labels["R_alpha"].setText(f"R_α = {gp.R_alpha:.3f} m")
+        self._param_labels["alpha"].setText(f"α = {gp.alpha_deg:.2f}°")
+        self._param_labels["Ps0"].setText(f"Ps0 = {res.Ps0:.2f} kPa")
+        self._param_labels["C_alpha"].setText(f"C_α = {res.C_alpha:.4f}")
+        self._param_labels["Pr"].setText(f"Pr_α = {res.Pr_alpha:.2f} kPa")
+        self._param_labels["ir"].setText(f"ir_α = {res.ir_alpha*1e3:.2f} kPa·ms")
+        self._param_labels["tA"].setText(f"tA = {res.tA*1e3:.3f} ms")
+        self._param_labels["t0"].setText(f"t0 = {res.t0*1e3:.3f} ms")
+        self._param_labels["b"].setText(f"b = {res.b:.4f}")
 
 
 # ---------------------------------------------------------------------------
