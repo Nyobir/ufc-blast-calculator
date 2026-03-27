@@ -5,10 +5,11 @@ Computes standoff geometry for each grid point relative to the charge:
   - Slant distance R_alpha from charge to surface point
   - Angle of incidence alpha (from the perpendicular line-of-sight)
 
-UFC 3-340-02 applicability limit: the scaled height-of-burst
-  Hc / W^(1/3) must exceed 0.397 ft/lb^(1/3) to ensure an air burst
-  (not a surface burst). Values at or below this limit fall outside
-  the scope of the reflected-pressure charts in the manual.
+Supports both air burst and surface burst scenarios.  Use
+``determine_burst_type(Hc, W)`` to classify a scenario before
+calling ``generate_grid()``.  The scaled height-of-burst threshold of
+0.397 (Hc / W^(1/3)) separates air bursts from surface bursts per
+UFC 3-340-02 Figure 2-15.
 """
 
 from __future__ import annotations
@@ -76,6 +77,28 @@ def compute_point_geometry(dx: float, dy: float, R: float) -> GridPoint:
     return GridPoint(dx=dx, dy=dy, R_alpha=R_alpha, alpha_deg=alpha_deg)
 
 
+def determine_burst_type(Hc: float, W: float) -> tuple[str, float]:
+    """Determine burst type from scaled height-of-burst.
+
+    Parameters
+    ----------
+    Hc : float
+        Height of burst above ground (m).
+    W : float
+        Charge mass (kg TNT equivalent).
+
+    Returns
+    -------
+    burst_type : str
+        ``'air'`` if Hc/W^(1/3) > 0.397, ``'surface'`` otherwise.
+    scaled_hob : float
+        The computed Hc/W^(1/3) value.
+    """
+    scaled_hob = Hc / (W ** (1.0 / 3.0)) if W > 0 else 0.0
+    burst_type = "air" if scaled_hob > 0.397 else "surface"
+    return burst_type, scaled_hob
+
+
 def generate_grid(
     R: float,
     W: float,
@@ -104,10 +127,9 @@ def generate_grid(
     R : float
         Perpendicular standoff distance from charge to facade (m).
     W : float
-        Charge mass in kg (TNT equivalent) — used only for the applicability
-        check.
+        Charge mass in kg (TNT equivalent).
     Hc : float
-        Height of burst above the ground (m) — used for applicability check.
+        Height of burst above the ground (m).
     width : float or None
         Total facade width (m) for building mode.
     height : float or None
@@ -120,29 +142,15 @@ def generate_grid(
     list[GridPoint]
         Ordered list of GridPoint objects (row-major: dy changes slowest).
 
-    Raises
-    ------
-    ValueError
-        If ``Hc / W**(1/3)`` does not exceed 0.397, indicating a surface
-        or near-surface burst outside UFC 3-340-02 applicability.
-
     Notes
     -----
     The scaled height-of-burst limit of 0.397 ft/lb^(1/3) is given in
     UFC 3-340-02 Figure 2-15 as the minimum value for air-burst conditions.
-    The value is used here in consistent SI-equivalent non-dimensional form:
-    since both Hc and W^(1/3) are in SI units the ratio is dimensionally
-    identical for the purpose of the threshold check.
+    Use ``determine_burst_type(Hc, W)`` to classify the scenario before
+    calling this function.  Both air and surface burst parameters are
+    accepted; burst-type-specific chart selection is the caller's
+    responsibility.
     """
-    # --- Applicability check -------------------------------------------------
-    scaled_hob = Hc / (W ** (1.0 / 3.0))
-    if scaled_hob <= 0.397:
-        raise ValueError(
-            f"Scaled height-of-burst Hc/W^(1/3) = {scaled_hob:.4f} does not "
-            f"exceed 0.397 — charge is at or below surface-burst threshold. "
-            f"UFC 3-340-02 air-burst charts are not applicable."
-        )
-
     points: list[GridPoint] = []
 
     if width is not None and height is not None:

@@ -13,9 +13,7 @@ Covers:
 
 import math
 
-import pytest
-
-from ufc_blast.core.geometry import GridPoint, compute_point_geometry, generate_grid
+from ufc_blast.core.geometry import GridPoint, compute_point_geometry, determine_burst_type, generate_grid
 
 # ---------------------------------------------------------------------------
 # Tolerance for floating-point comparisons
@@ -131,26 +129,47 @@ class TestGenerateGridBuildingMode:
             assert math.isclose(gp.alpha_deg, expected_alpha, abs_tol=1e-10)
 
 
+class TestDetermineBurstType:
+    """Tests for burst type auto-detection."""
+
+    def test_air_burst(self):
+        """Hc/W^(1/3) > 0.397 → 'air'."""
+        burst_type, scaled_hob = determine_burst_type(Hc=10.0, W=1.0)
+        assert burst_type == "air"
+        assert scaled_hob > 0.397
+
+    def test_surface_burst(self):
+        """Hc/W^(1/3) <= 0.397 → 'surface'."""
+        burst_type, scaled_hob = determine_burst_type(Hc=3.0, W=1000.0)
+        assert burst_type == "surface"
+        assert scaled_hob <= 0.397
+
+    def test_exact_threshold_is_surface(self):
+        """Ratio exactly equal to 0.397 → 'surface' (strict inequality)."""
+        W = 8.0
+        Hc = 0.397 * (W ** (1.0 / 3.0))
+        burst_type, _ = determine_burst_type(Hc=Hc, W=W)
+        assert burst_type == "surface"
+
+    def test_zero_hc_is_surface(self):
+        """Hc=0 → surface burst."""
+        burst_type, scaled_hob = determine_burst_type(Hc=0.0, W=100.0)
+        assert burst_type == "surface"
+        assert scaled_hob == 0.0
+
+
 class TestGenerateGridApplicability:
-    """Tests for the UFC 3-340-02 surface-burst applicability guard."""
+    """generate_grid now works for both air and surface bursts."""
 
-    def test_surface_burst_raises(self):
-        """Hc/W^(1/3) <= 0.397 must raise ValueError."""
-        # W=1000 kg → W^(1/3)≈10, Hc=3 → ratio=0.3 < 0.397
-        with pytest.raises(ValueError, match="0.397"):
-            generate_grid(R=30.0, W=1000.0, Hc=3.0)
+    def test_surface_burst_no_longer_raises(self):
+        """Surface burst parameters should not raise ValueError."""
+        points = generate_grid(R=30.0, W=1000.0, Hc=3.0, width=10.0, height=8.0, step=2.0)
+        assert len(points) > 0
 
-    def test_exact_threshold_raises(self):
-        """Ratio exactly equal to 0.397 must also raise (strict inequality)."""
-        # Hc = 0.397 * W^(1/3)
-        W = 8.0  # W^(1/3) = 2
-        Hc = 0.397 * (W ** (1.0 / 3.0))  # exactly 0.397 * 2 = 0.794
-        with pytest.raises(ValueError):
-            generate_grid(R=30.0, W=W, Hc=Hc)
-
-    def test_valid_hob_does_not_raise(self):
-        """Ratio > 0.397 must not raise."""
-        generate_grid(R=30.0, W=VALID_W, Hc=VALID_Hc, width=4.0, height=4.0)
+    def test_valid_hob_still_works(self):
+        """Air burst parameters continue to work."""
+        points = generate_grid(R=30.0, W=1.0, Hc=10.0, width=4.0, height=4.0)
+        assert len(points) > 0
 
 
 class TestGenerateGridOpenField:
