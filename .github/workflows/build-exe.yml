@@ -35,20 +35,24 @@ jobs:
 
       - name: Smoke test — CLI point command
         run: |
-          dist\ufc-blast.exe point --W 200 --R 30 --Hc 5 --alpha 0
+          dist\ufc-blast\ufc-blast.exe point --W 200 --R 30 --Hc 5 --alpha 0
 
       - name: Smoke test — GUI import check
         run: |
-          dist\ufc-blast.exe gui-check
+          dist\ufc-blast\ufc-blast.exe gui-check
+
+      - name: Zip distribution
+        run: |
+          Compress-Archive -Path dist\ufc-blast -DestinationPath dist\ufc-blast-windows.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ufc-blast-windows
-          path: dist/ufc-blast.exe
+          path: dist/ufc-blast-windows.zip
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ufc-blast.exe
+          files: dist/ufc-blast-windows.zip

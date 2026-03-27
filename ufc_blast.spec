@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for UFC Blast Calculator."""
+"""PyInstaller spec for UFC Blast Calculator — directory bundle."""
 
 import sys
 from pathlib import Path
@@ -51,18 +51,26 @@ pyz = PYZ(a.pure, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="ufc-blast",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=True,  # Show console for debugging — switch to False once stable
     disable_windowed_traceback=False,
     argv_emulation=False,
     icon=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="ufc-blast",
 )
