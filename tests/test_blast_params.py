@@ -17,7 +17,9 @@ import pytest
 from ufc_blast.core.blast_params import (
     BlastPointResult,
     compute_point,
+    compute_points_batch,
     friedlander,
+    load_ufc_tables,
     solve_friedlander_b,
 )
 
@@ -211,3 +213,45 @@ class TestComputePoint:
         result = compute_point(R_alpha=45.0, alpha_deg=20.0, W=200.0)
         for field_name, value in result.__dict__.items():
             assert math.isfinite(value), f"Field {field_name} is not finite: {value}"
+
+
+# ===========================================================================
+# TestSurfaceBurstComputation
+# ===========================================================================
+
+
+class TestSurfaceBurstComputation:
+    """Tests for surface burst table selection."""
+
+    def test_surface_burst_returns_result(self):
+        """compute_point with burst_type='surface' returns a valid result."""
+        result = compute_point(R_alpha=30.0, alpha_deg=0.0, W=200.0, burst_type="surface")
+        assert isinstance(result, BlastPointResult)
+        assert result.Ps0 > 0.0
+        assert result.Pr_alpha > 0.0
+        assert result.tA > 0.0
+        assert result.t0 > 0.0
+        assert result.b > 0.0
+
+    def test_surface_uses_different_tables(self):
+        """Surface burst should give different Ps0 than air burst at same Z."""
+        result_air = compute_point(R_alpha=30.0, alpha_deg=0.0, W=200.0, burst_type="air")
+        result_surface = compute_point(R_alpha=30.0, alpha_deg=0.0, W=200.0, burst_type="surface")
+        assert result_air.Ps0 != result_surface.Ps0
+
+    def test_batch_surface_burst(self):
+        """compute_points_batch with burst_type='surface' works."""
+        import numpy as np
+        R_alphas = np.array([30.0, 40.0, 50.0])
+        alpha_degs = np.array([0.0, 10.0, 20.0])
+        results = compute_points_batch(R_alphas, alpha_degs, W=200.0, burst_type="surface")
+        assert len(results) == 3
+        for r in results:
+            assert isinstance(r, BlastPointResult)
+            assert r.Ps0 > 0.0
+
+    def test_default_burst_type_is_air(self):
+        """Omitting burst_type defaults to air burst (backward compatible)."""
+        result_default = compute_point(R_alpha=30.0, alpha_deg=0.0, W=200.0)
+        result_air = compute_point(R_alpha=30.0, alpha_deg=0.0, W=200.0, burst_type="air")
+        assert result_default.Ps0 == result_air.Ps0

@@ -28,6 +28,7 @@ else:
     _BASE = Path(__file__).resolve().parent.parent.parent
 
 DATA_DIR = _BASE / "data" / "free_air"
+SURFACE_DATA_DIR = _BASE / "data" / "surface"
 
 
 @dataclass
@@ -101,8 +102,33 @@ def load_ufc_tables() -> None:
         "tA_scaled_ms_kg13",
     )
 
+    # Surface burst tables (Figure 2-15)
+    _tables["surface_ps0"] = Table1D.from_csv(
+        SURFACE_DATA_DIR / "figure_2_15_wpd_ps0.csv",
+        "z_m_kg13",
+        "ps0_kpa",
+    )
+    _tables["surface_tA"] = Table1D.from_csv(
+        SURFACE_DATA_DIR / "figure_2_15_tA.csv",
+        "z_m_kg13",
+        "tA_scaled_ms_kg13",
+    )
+    _tables["surface_t0"] = Table1D.from_csv(
+        SURFACE_DATA_DIR / "figure_2_15_t0.csv",
+        "z_m_kg13",
+        "t0_scaled_ms_kg13",
+    )
 
-def compute_point(R_alpha: float, alpha_deg: float, W: float) -> BlastPointResult:
+    # Triple point height table (Figure 2-13)
+    _tables["triple_point"] = Table2D.from_csv(
+        DATA_DIR / "figure_2_13_triple_point.csv",
+        "hc_scaled_m_kg13",
+        "rg_scaled_m_kg13",
+        "ht_scaled_m_kg13",
+    )
+
+
+def compute_point(R_alpha: float, alpha_deg: float, W: float, burst_type: str = "air") -> BlastPointResult:
     """Compute blast parameters at a surface point using UFC 3-340-02 charts.
 
     Parameters
@@ -125,10 +151,15 @@ def compute_point(R_alpha: float, alpha_deg: float, W: float) -> BlastPointResul
     W_cbrt = W ** (1.0 / 3.0)
     Z = R_alpha / W_cbrt
 
-    # Incident overpressure from Figure 2-7 (WPD digitization)
-    Ps0 = _tables["ps0"].lookup(Z)
+    # Select tables based on burst type
+    ps0_table = _tables["surface_ps0"] if burst_type == "surface" else _tables["ps0"]
+    tA_table = _tables["surface_tA"] if burst_type == "surface" else _tables["tA"]
+    t0_table = _tables["surface_t0"] if burst_type == "surface" else _tables["t0"]
 
-    # Reflection coefficient from Figure 2-193
+    # Incident overpressure
+    Ps0 = ps0_table.lookup(Z)
+
+    # Reflection coefficient from Figure 2-193 (shared across burst types)
     C_alpha = _tables["calpha"].lookup(angle=alpha_deg, ps0=Ps0)
     Pr_alpha = C_alpha * Ps0
 
@@ -136,11 +167,11 @@ def compute_point(R_alpha: float, alpha_deg: float, W: float) -> BlastPointResul
     ir_alpha_scaled = _tables["iralpha"].lookup(angle=alpha_deg, ps0=Ps0)
     ir_alpha = ir_alpha_scaled * W_cbrt / 1000.0
 
-    # Arrival time from Figure 2-7 (ms/kg^1/3 → s)
-    tA = _tables["tA"].lookup(Z) * W_cbrt / 1000.0
+    # Arrival time (ms/kg^1/3 → s)
+    tA = tA_table.lookup(Z) * W_cbrt / 1000.0
 
-    # Positive phase duration from Figure 2-7 (ms/kg^1/3 → s)
-    t0 = _tables["t0"].lookup(Z) * W_cbrt / 1000.0
+    # Positive phase duration (ms/kg^1/3 → s)
+    t0 = t0_table.lookup(Z) * W_cbrt / 1000.0
 
     # Friedlander decay parameter
     b = solve_friedlander_b(Pr_alpha, t0, ir_alpha)
@@ -160,6 +191,7 @@ def compute_points_batch(
     R_alphas: np.ndarray,
     alpha_degs: np.ndarray,
     W: float,
+    burst_type: str = "air",
 ) -> list[BlastPointResult]:
     """Vectorized computation of blast parameters for many points.
 
@@ -190,10 +222,15 @@ def compute_points_batch(
     W_cbrt = W ** (1.0 / 3.0)
     Z = R_alphas / W_cbrt
 
+    # Select tables based on burst type
+    ps0_table = _tables["surface_ps0"] if burst_type == "surface" else _tables["ps0"]
+    tA_table = _tables["surface_tA"] if burst_type == "surface" else _tables["tA"]
+    t0_table = _tables["surface_t0"] if burst_type == "surface" else _tables["t0"]
+
     # Bulk 1D lookups
-    Ps0 = _tables["ps0"].lookup_batch(Z)
-    tA_vals = _tables["tA"].lookup_batch(Z) * W_cbrt / 1000.0
-    t0_vals = _tables["t0"].lookup_batch(Z) * W_cbrt / 1000.0
+    Ps0 = ps0_table.lookup_batch(Z)
+    tA_vals = tA_table.lookup_batch(Z) * W_cbrt / 1000.0
+    t0_vals = t0_table.lookup_batch(Z) * W_cbrt / 1000.0
 
     # Bulk 2D lookups
     C_alpha = _tables["calpha"].lookup_batch(alpha_degs, Ps0)
