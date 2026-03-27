@@ -7,24 +7,29 @@ def _run() -> None:
     try:
         from ufc_blast.cli import main
         main()
-    except Exception as exc:
-        # When frozen as a GUI exe (console=False), stderr is invisible.
-        # Show a native error dialog so the user sees what went wrong.
+    except Exception:
+        # When frozen as a GUI exe, stderr may be invisible.
+        # Always write a crash log next to the exe first.
         if getattr(sys, "frozen", False):
             import traceback
             msg = traceback.format_exc()
+
+            # 1. Write crash log next to the exe
             try:
-                # Try Qt message box if PySide6 loaded
-                from PySide6.QtWidgets import QApplication, QMessageBox
-                app = QApplication.instance() or QApplication(sys.argv)
-                QMessageBox.critical(None, "UFC Blast — Error", msg)
+                import os
+                log_path = os.path.join(os.path.dirname(sys.executable), "ufc-blast-crash.log")
+                with open(log_path, "w") as f:
+                    f.write(msg)
             except Exception:
-                # Fallback to ctypes Win32 MessageBox
-                try:
-                    import ctypes
-                    ctypes.windll.user32.MessageBoxW(0, msg, "UFC Blast — Error", 0x10)
-                except Exception:
-                    pass
+                pass
+
+            # 2. Try native Win32 MessageBox (no Qt dependency)
+            try:
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(0, msg, "UFC Blast — Error", 0x10)
+            except Exception:
+                pass
+
             sys.exit(1)
         else:
             raise
