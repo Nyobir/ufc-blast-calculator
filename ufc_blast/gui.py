@@ -46,42 +46,21 @@ from PySide6.QtWidgets import (
 
 from ufc_blast.core.blast_params import (
     BlastPointResult,
-    apply_mach_stem,
+    FacadeResult,
+    compute_facade,
     compute_point,
-    compute_points_batch,
     friedlander,
     load_ufc_tables,
 )
-from ufc_blast.core.geometry import GridPoint, determine_burst_type, generate_grid
+from ufc_blast.core.geometry import GridPoint
 
 
 # ---------------------------------------------------------------------------
 # Data helpers
 # ---------------------------------------------------------------------------
 
-def _compute_results(
-    grid_points: list[GridPoint],
-    W: float,
-    burst_type: str = "air",
-) -> dict[tuple[float, float], BlastPointResult]:
-    """Compute blast parameters for every (dx, dy) grid point using vectorized batch.
-
-    Returns a mapping  (dx, dy) → BlastPointResult.
-    """
-    R_alphas = np.array([gp.R_alpha for gp in grid_points])
-    alpha_degs = np.array([gp.alpha_deg for gp in grid_points])
-    results = compute_points_batch(R_alphas, alpha_degs, W, burst_type=burst_type)
-
-    result_map: dict[tuple[float, float], BlastPointResult] = {}
-    for gp, res in zip(grid_points, results):
-        key = (gp.dx, gp.dy)
-        if key not in result_map:
-            result_map[key] = res
-    return result_map
-
-
 class _ComputeWorker(QThread):
-    """Background thread for blast computation.
+    """Background thread that calls :func:`compute_facade`.
 
     Results are stored as attributes rather than passed through Signal args,
     because PySide6 cannot serialise arbitrary Python dicts across threads.
@@ -98,32 +77,16 @@ class _ComputeWorker(QThread):
         self.height = height
         self.step = step
         self.error: str | None = None
-        self.grid_points: list | None = None
-        self.result_map: dict | None = None
-        self.mach_curve: list | None = None
-        self.burst_type: str = "air"
-        self.scaled_hob: float = 0.0
+        self.facade: FacadeResult | None = None
         self.elapsed: float = 0.0
 
     def run(self):
         t0 = time.perf_counter()
         try:
-            self.burst_type, self.scaled_hob = determine_burst_type(self.Hc, self.W)
-            self.grid_points = generate_grid(
-                self.R, self.W, self.Hc,
+            self.facade = compute_facade(
+                R=self.R, W=self.W, Hc=self.Hc,
                 width=self.width, height=self.height, step=self.step,
             )
-            self.result_map = _compute_results(self.grid_points, self.W, burst_type=self.burst_type)
-
-            # Apply Mach stem correction for air bursts only
-            if self.burst_type == "air":
-                self.result_map, self.mach_curve = apply_mach_stem(
-                    self.grid_points, self.result_map,
-                    W=self.W, Hc=self.Hc, R=self.R,
-                )
-            else:
-                self.mach_curve = []
-
             self.elapsed = time.perf_counter() - t0
         except Exception as exc:
             self.error = str(exc)
@@ -666,20 +629,21 @@ class BlastWindow(QMainWindow):
             self._status.showMessage(f"Error: {self._worker.error}")
             return
 
-        self._grid_points = self._worker.grid_points
-        self._result_map  = self._worker.result_map
-        self._mach_curve  = self._worker.mach_curve
+        facade = self._worker.facade
+        self._grid_points = facade.grid_points
+        self._result_map  = facade.result_map
+        self._mach_curve  = facade.mach_curve
         self._width       = self._worker_width
         self._height      = self._worker_height
 
         # Update burst type label
-        bt = self._worker.burst_type
-        hob = self._worker.scaled_hob
+        bt = facade.burst_type
+        hob = facade.scaled_hob
         if bt == "air":
-            self._burst_type_label.setText(f"Air burst (Hc/W^\u215b = {hob:.2f})")
+            self._burst_type_label.setText(f"Air burst (Hc/W\u215b = {hob:.2f})")
             self._burst_type_label.setStyleSheet("font-weight: bold; padding-left: 10px; color: #2060c0;")
         else:
-            self._burst_type_label.setText(f"Surface burst (Hc/W^\u215b = {hob:.2f})")
+            self._burst_type_label.setText(f"Surface burst (Hc/W\u215b = {hob:.2f})")
             self._burst_type_label.setStyleSheet("font-weight: bold; padding-left: 10px; color: #c06020;")
 
         self._contour_canvas.draw_contours(
@@ -687,7 +651,7 @@ class BlastWindow(QMainWindow):
             mach_curve=self._mach_curve,
         )
         self._status.showMessage(
-            f"Calculated {len(self._grid_points)} points in {self._worker.elapsed:.2f} s"
+            f"Calculated {len(facade.grid_points)} points in {self._worker.elapsed:.2f} s"
         )
 
     # ------------------------------------------------------------------

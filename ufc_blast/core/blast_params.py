@@ -363,6 +363,90 @@ def friedlander(
     return P
 
 
+@dataclass
+class FacadeResult:
+    """Complete facade computation result.
+
+    Single source of truth for the blast parameter pipeline — used by
+    both the CLI and the GUI to guarantee identical results.
+    """
+
+    burst_type: str
+    scaled_hob: float
+    grid_points: list
+    result_map: dict[tuple[float, float], BlastPointResult]
+    mach_curve: list[tuple[float, float]]
+
+
+def compute_facade(
+    R: float,
+    W: float,
+    Hc: float,
+    width: float | None = None,
+    height: float | None = None,
+    step: float = 1.0,
+) -> FacadeResult:
+    """Run the full blast-parameter pipeline for a facade.
+
+    This is the **single computation path** shared by the CLI and the GUI.
+    Any change to the calculation logic must happen here so that both
+    interfaces stay in sync.
+
+    Steps
+    -----
+    1. Determine burst type from Hc / W^(1/3).
+    2. Generate the facade grid.
+    3. Batch-compute blast parameters (air or surface tables).
+    4. Apply Mach stem correction (air bursts only).
+
+    Parameters
+    ----------
+    R : float   Perpendicular standoff (m).
+    W : float   Charge mass (kg TNT).
+    Hc : float  Height of burst (m).
+    width, height : float or None   Facade dimensions (building mode).
+    step : float   Grid spacing (m).
+
+    Returns
+    -------
+    FacadeResult
+        Contains burst_type, grid_points, result_map, and mach_curve.
+    """
+    from ufc_blast.core.geometry import determine_burst_type, generate_grid
+
+    if not _tables:
+        load_ufc_tables()
+
+    burst_type, scaled_hob = determine_burst_type(Hc, W)
+
+    grid_points = generate_grid(R, W, Hc, width=width, height=height, step=step)
+
+    R_alphas = np.array([gp.R_alpha for gp in grid_points])
+    alpha_degs = np.array([gp.alpha_deg for gp in grid_points])
+    results = compute_points_batch(R_alphas, alpha_degs, W, burst_type=burst_type)
+
+    result_map: dict[tuple[float, float], BlastPointResult] = {}
+    for gp, res in zip(grid_points, results):
+        key = (gp.dx, gp.dy)
+        if key not in result_map:
+            result_map[key] = res
+
+    if burst_type == "air":
+        result_map, mach_curve = apply_mach_stem(
+            grid_points, result_map, W=W, Hc=Hc, R=R,
+        )
+    else:
+        mach_curve = []
+
+    return FacadeResult(
+        burst_type=burst_type,
+        scaled_hob=scaled_hob,
+        grid_points=grid_points,
+        result_map=result_map,
+        mach_curve=mach_curve,
+    )
+
+
 def apply_mach_stem(
     grid_points: list,
     result_map: dict[tuple[float, float], BlastPointResult],

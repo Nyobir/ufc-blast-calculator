@@ -149,54 +149,26 @@ def _cmd_point(args: argparse.Namespace) -> int:
 
 
 def _cmd_compute(args: argparse.Namespace) -> int:
-    import numpy as np
-
-    from ufc_blast.core.blast_params import (
-        apply_mach_stem,
-        compute_points_batch,
-        load_ufc_tables,
-    )
-    from ufc_blast.core.geometry import generate_grid
-
-    load_ufc_tables()
-    burst_type = _detect_burst_type(args.Hc, args.W)
+    from ufc_blast.core.blast_params import compute_facade
 
     try:
-        grid = generate_grid(
-            R=args.R,
-            W=args.W,
-            Hc=args.Hc,
-            width=args.width,
-            height=args.height,
-            step=args.step,
+        facade = compute_facade(
+            R=args.R, W=args.W, Hc=args.Hc,
+            width=args.width, height=args.height, step=args.step,
         )
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    # Batch computation
-    R_alphas = np.array([gp.R_alpha for gp in grid])
-    alpha_degs = np.array([gp.alpha_deg for gp in grid])
-    results = compute_points_batch(R_alphas, alpha_degs, args.W, burst_type=burst_type)
-
-    # Build result map
-    result_map: dict[tuple[float, float], Any] = {}
-    for gp, res in zip(grid, results):
-        key = (gp.dx, gp.dy)
-        if key not in result_map:
-            result_map[key] = res
-
-    # Apply Mach stem correction for air bursts
-    if burst_type == "air":
-        result_map, mach_curve = apply_mach_stem(
-            grid, result_map, W=args.W, Hc=args.Hc, R=args.R,
-        )
-        if mach_curve:
-            print(f"  Mach stem: {len(mach_curve)} column(s) corrected")
+    # Print burst type
+    label = "Air burst" if facade.burst_type == "air" else "Surface burst"
+    print(f"  Burst type: {label} (Hc/W^(1/3) = {facade.scaled_hob:.4f})")
+    if facade.mach_curve:
+        print(f"  Mach stem: {len(facade.mach_curve)} column(s) corrected")
 
     rows: list[dict[str, Any]] = []
-    for gp in grid:
-        result = result_map[(gp.dx, gp.dy)]
+    for gp in facade.grid_points:
+        result = facade.result_map[(gp.dx, gp.dy)]
         rows.append(_result_to_dict(gp, result))
 
     if not rows:
