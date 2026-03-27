@@ -15,11 +15,10 @@ Unit conversions applied:
   - Pressure [psi] → [kPa]:
       factor = 6.89476 kPa/psi
   - Time [ms/lb^(1/3)] → [ms/kg^(1/3)]:
-      factor = (0.453592)^(1/3) ≈ 0.76886
+      W^(1/3) is in DENOMINATOR, so: factor = 1/(0.453592)^(1/3) = (2.20462)^(1/3) ≈ 1.3015
   - Impulse [psi-ms/lb^(1/3)] → [kPa-ms/kg^(1/3)]:
-      factor = 6.89476 × (0.453592)^(1/3) ≈ 5.3005
-      Derivation: psi × (ms/lb^(1/3)) × (6.89476 kPa/psi) × (0.453592 kg/lb)^(1/3)
-                = kPa × ms × kg^(1/3) / kg^(1/3) = kPa-ms/kg^(1/3) ✓
+      factor = 6.89476 / (0.453592)^(1/3) = 6.89476 × (2.20462)^(1/3) ≈ 8.974
+      Derivation: (ir/W^1/3)[kPa-ms/kg^1/3] = (ir/W^1/3)[psi-ms/lb^1/3] × (kPa/psi) / (kg/lb)^(1/3)
 """
 
 import csv
@@ -44,14 +43,16 @@ Z_FACTOR = FT_PER_M / CBRT_LB_PER_KG         # ≈ 0.39685
 KPA_PER_PSI = 6.89476
 
 # Time scaled: ms/lb^(1/3) → ms/kg^(1/3)
-# t/W^(1/3) [ms/kg^(1/3)] = t/W^(1/3) [ms/lb^(1/3)] × (lb/kg)^(1/3)
-#                           = value × (0.453592)^(1/3)
-TIME_FACTOR = CBRT_LB_PER_KG   # ≈ 0.76886
+# W^(1/3) is in the DENOMINATOR:
+# t/W^(1/3) [ms/kg^(1/3)] = t/W^(1/3) [ms/lb^(1/3)] / (kg/lb)^(1/3)
+#                          = value / (0.453592)^(1/3) = value × (2.20462)^(1/3)
+TIME_FACTOR = 1.0 / CBRT_LB_PER_KG   # ≈ 1.3015
 
 # Impulse scaled: psi-ms/lb^(1/3) → kPa-ms/kg^(1/3)
-# i/W^(1/3) [kPa-ms/kg^(1/3)] = i/W^(1/3) [psi-ms/lb^(1/3)] × (kPa/psi) × (lb/kg)^(1/3)
-#                               = value × 6.89476 × 0.76886
-IMPULSE_FACTOR = KPA_PER_PSI * CBRT_LB_PER_KG  # ≈ 5.3005
+# W^(1/3) is in the DENOMINATOR:
+# i/W^(1/3) [kPa-ms/kg^(1/3)] = i/W^(1/3) [psi-ms/lb^(1/3)] × (kPa/psi) / (kg/lb)^(1/3)
+#                               = value × 6.89476 / 0.76886
+IMPULSE_FACTOR = KPA_PER_PSI / CBRT_LB_PER_KG  # ≈ 8.974
 
 # ---------------------------------------------------------------------------
 # Paths
