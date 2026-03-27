@@ -13,6 +13,11 @@ DATA_DIR = ROOT / "data" / "free_air"
 # Collect all CSV data files
 data_files = [(str(f), str(Path("data") / "free_air")) for f in DATA_DIR.glob("*.csv")]
 
+# Include surface burst data if directory exists
+SURFACE_DIR = ROOT / "data" / "surface"
+if SURFACE_DIR.exists():
+    data_files += [(str(f), str(Path("data") / "surface")) for f in SURFACE_DIR.glob("*.csv")]
+
 # PySide6 Qt plugins (platforms, styles, imageformats) are needed at runtime
 data_files += collect_data_files("PySide6", includes=["plugins/**/*"])
 
