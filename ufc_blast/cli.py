@@ -301,12 +301,12 @@ def _build_parser() -> argparse.ArgumentParser:
             "distribution over the facade (requires Task 9 gui.py)."
         ),
     )
-    p_gui.add_argument("--W", type=float, required=True, metavar="kg",
-                       help="Charge mass (kg TNT equivalent).")
-    p_gui.add_argument("--R", type=float, required=True, metavar="m",
-                       help="Perpendicular standoff distance (m).")
-    p_gui.add_argument("--Hc", type=float, required=True, metavar="m",
-                       help="Height of burst above ground (m).")
+    p_gui.add_argument("--W", type=float, default=200.0, metavar="kg",
+                       help="Charge mass (kg TNT equivalent, default: 200).")
+    p_gui.add_argument("--R", type=float, default=30.0, metavar="m",
+                       help="Perpendicular standoff distance (m, default: 30).")
+    p_gui.add_argument("--Hc", type=float, default=5.0, metavar="m",
+                       help="Height of burst above ground (m, default: 5).")
     p_gui.add_argument("--width", type=float, default=10.0, metavar="m",
                        help="Facade width (m, default: 10).")
     p_gui.add_argument("--height", type=float, default=8.0, metavar="m",
@@ -325,6 +325,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
+    # No subcommand → default to gui
+    if not hasattr(args, "func"):
+        args = parser.parse_args(["gui"])
     sys.exit(args.func(args))
 
 
