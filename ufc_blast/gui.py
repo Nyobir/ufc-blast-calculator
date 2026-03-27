@@ -339,8 +339,9 @@ class FriedlanderPanel(QWidget):
         ax = self._ax
         ax.cla()
 
+        t_start = max(0.0, res.tA - 5e-3)  # start 5 ms before arrival
         t_end = res.tA + 1.5 * res.t0
-        t = np.linspace(0.0, t_end, 2000)
+        t = np.linspace(t_start, t_end, 2000)
         P = friedlander(t, res.Pr_alpha, res.tA, res.t0, res.b)
 
         # Store for hover interpolation
@@ -384,10 +385,11 @@ class FriedlanderPanel(QWidget):
         if self._vline is None:
             self._vline = ax.axvline(t_ms, color="gray", linewidth=0.8, linestyle="--")
             self._hline = ax.axhline(p_val, color="gray", linewidth=0.8, linestyle="--")
-            self._hover_annotation = ax.annotate(
-                "", xy=(t_ms, p_val),
-                xytext=(10, 10), textcoords="offset points",
-                fontsize=8,
+            # Fixed position in axes coordinates (top-left) to avoid plot resizing
+            self._hover_annotation = ax.text(
+                0.02, 0.97, "",
+                transform=ax.transAxes,
+                fontsize=8, verticalalignment="top",
                 bbox=dict(boxstyle="round,pad=0.3", fc="lightyellow", ec="gray", alpha=0.9),
             )
         else:
@@ -398,7 +400,6 @@ class FriedlanderPanel(QWidget):
             self._hover_annotation.set_visible(True)
 
         self._hover_annotation.set_text(f"t = {t_ms:.2f} ms\nP = {p_val:.2f} kPa")
-        self._hover_annotation.xy = (t_ms, p_val)
 
         self._canvas.draw_idle()
 
