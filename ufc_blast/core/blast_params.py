@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -360,3 +361,102 @@ def friedlander(
     tau = (t[mask] - tA) / t0
     P[mask] = Pr_alpha * (1.0 - tau) * np.exp(-b * tau)
     return P
+
+
+def apply_mach_stem(
+    grid_points: list,
+    result_map: dict[tuple[float, float], BlastPointResult],
+    W: float,
+    Hc: float,
+    R: float,
+) -> tuple[dict[tuple[float, float], BlastPointResult], list[tuple[float, float]]]:
+    """Apply Mach stem correction to grid results.
+
+    For each facade column (unique dx), compute the triple point height from
+    UFC Figure 2-13. All grid points below that height get their blast
+    parameters overwritten with the values at the triple point height
+    (uniform Mach stem pressure).
+
+    Parameters
+    ----------
+    grid_points : list[GridPoint]
+        Grid points on the facade.
+    result_map : dict
+        Mapping (dx, dy) -> BlastPointResult (modified in-place).
+    W : float
+        Charge mass (kg TNT equivalent).
+    Hc : float
+        Height of burst above ground (m).
+    R : float
+        Perpendicular standoff distance (m).
+
+    Returns
+    -------
+    result_map : dict
+        Modified result map with Mach-corrected values below triple point.
+    mach_curve : list[tuple[float, float]]
+        List of (dx, mach_dy) points defining the Mach line on the facade.
+    """
+    if not _tables:
+        load_ufc_tables()
+
+    triple_table = _tables["triple_point"]
+    W_cbrt = W ** (1.0 / 3.0)
+    Hc_scaled = Hc / W_cbrt
+
+    # Group grid points by column (dx)
+    columns: dict[float, list[float]] = defaultdict(list)
+    for gp in grid_points:
+        columns[gp.dx].append(gp.dy)
+
+    # Sort dy values in each column
+    for dx in columns:
+        columns[dx].sort()
+
+    mach_curve: list[tuple[float, float]] = []
+
+    for dx in sorted(columns.keys()):
+        dy_list = columns[dx]
+
+        # Horizontal ground distance from charge epicenter
+        Rg = math.sqrt(R ** 2 + dx ** 2)
+        Rg_scaled = Rg / W_cbrt
+
+        # Look up triple point height
+        try:
+            HT_scaled = triple_table.lookup(angle=Rg_scaled, ps0=Hc_scaled)
+        except (ValueError, KeyError):
+            # Rg_scaled or Hc_scaled outside table range — no Mach stem here
+            continue
+
+        HT = HT_scaled * W_cbrt
+        # Convert to facade coordinate: dy=0 is at burst height, ground at dy=-Hc
+        mach_dy = HT - Hc
+
+        mach_curve.append((dx, mach_dy))
+
+        # Find the blast result at the Mach height by interpolating between
+        # the two nearest grid points above and below mach_dy
+        dy_arr = np.array(dy_list)
+        above_mask = dy_arr >= mach_dy
+        below_mask = dy_arr < mach_dy
+
+        if not np.any(below_mask):
+            # Mach line is below all grid points — no correction needed
+            continue
+
+        if not np.any(above_mask):
+            # Entire column is in Mach zone — use the topmost point
+            top_dy = dy_list[-1]
+            mach_result = result_map[(dx, top_dy)]
+        else:
+            # Interpolate: find nearest point at or above mach_dy
+            above_dy = float(dy_arr[above_mask][0])  # smallest dy >= mach_dy
+            mach_result = result_map[(dx, above_dy)]
+
+        # Overwrite all points below the Mach line
+        for dy in dy_list:
+            if dy < mach_dy:
+                result_map[(dx, dy)] = mach_result
+
+    return result_map, mach_curve
