@@ -46,12 +46,13 @@ from PySide6.QtWidgets import (
 
 from ufc_blast.core.blast_params import (
     BlastPointResult,
+    apply_mach_stem,
     compute_point,
     compute_points_batch,
     friedlander,
     load_ufc_tables,
 )
-from ufc_blast.core.geometry import GridPoint, generate_grid
+from ufc_blast.core.geometry import GridPoint, determine_burst_type, generate_grid
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +62,7 @@ from ufc_blast.core.geometry import GridPoint, generate_grid
 def _compute_results(
     grid_points: list[GridPoint],
     W: float,
+    burst_type: str = "air",
 ) -> dict[tuple[float, float], BlastPointResult]:
     """Compute blast parameters for every (dx, dy) grid point using vectorized batch.
 
@@ -68,7 +70,7 @@ def _compute_results(
     """
     R_alphas = np.array([gp.R_alpha for gp in grid_points])
     alpha_degs = np.array([gp.alpha_deg for gp in grid_points])
-    results = compute_points_batch(R_alphas, alpha_degs, W)
+    results = compute_points_batch(R_alphas, alpha_degs, W, burst_type=burst_type)
 
     result_map: dict[tuple[float, float], BlastPointResult] = {}
     for gp, res in zip(grid_points, results):
@@ -98,16 +100,30 @@ class _ComputeWorker(QThread):
         self.error: str | None = None
         self.grid_points: list | None = None
         self.result_map: dict | None = None
+        self.mach_curve: list | None = None
+        self.burst_type: str = "air"
+        self.scaled_hob: float = 0.0
         self.elapsed: float = 0.0
 
     def run(self):
         t0 = time.perf_counter()
         try:
+            self.burst_type, self.scaled_hob = determine_burst_type(self.Hc, self.W)
             self.grid_points = generate_grid(
                 self.R, self.W, self.Hc,
                 width=self.width, height=self.height, step=self.step,
             )
-            self.result_map = _compute_results(self.grid_points, self.W)
+            self.result_map = _compute_results(self.grid_points, self.W, burst_type=self.burst_type)
+
+            # Apply Mach stem correction for air bursts only
+            if self.burst_type == "air":
+                self.result_map, self.mach_curve = apply_mach_stem(
+                    self.grid_points, self.result_map,
+                    W=self.W, Hc=self.Hc, R=self.R,
+                )
+            else:
+                self.mach_curve = []
+
             self.elapsed = time.perf_counter() - t0
         except Exception as exc:
             self.error = str(exc)
@@ -192,8 +208,9 @@ class ContourCanvas(FigureCanvas):
         result_map: dict[tuple[float, float], BlastPointResult],
         width: float,
         height: float,
+        mach_curve: list[tuple[float, float]] | None = None,
     ) -> None:
-        """Redraw the contour map with new data."""
+        """Redraw the contour map with new data, with optional Mach stem zones."""
         self._grid_points = grid_points
         self._result_map = result_map
         self._click_marker = None
@@ -203,34 +220,71 @@ class ContourCanvas(FigureCanvas):
         X, Y, Pr = _build_meshgrid(grid_points, result_map)
 
         fig = self.figure
-
-        # Full clear: remove old axes (including colorbar axes) and recreate
         fig.clear()
         self.ax = fig.add_subplot(111)
         ax = self.ax
         self._colorbar = None
 
-        # Filled contours
-        cf = ax.contourf(X, Y, Pr, levels=15, cmap="YlOrRd", zorder=1)
+        vmin, vmax = float(np.nanmin(Pr)), float(np.nanmax(Pr))
 
-        # Contour lines
-        cs = ax.contour(X, Y, Pr, levels=10, colors="black", linewidths=0.8, zorder=2)
-        ax.clabel(cs, inline=True, fontsize=7, fmt="%.0f kPa")
+        has_mach = mach_curve is not None and len(mach_curve) > 0
 
-        # Colorbar
-        self._colorbar = fig.colorbar(cf, ax=ax, fraction=0.046, pad=0.04)
-        self._colorbar.set_label("Pr_α (kPa)", fontsize=9)
+        if has_mach:
+            # Build a per-cell Mach height lookup
+            mach_dict = {dx: mach_dy for dx, mach_dy in mach_curve}
+
+            # Create masked arrays: above and below the Mach line
+            Pr_above = Pr.copy()
+            Pr_below = Pr.copy()
+
+            dx_vals = sorted({gp.dx for gp in grid_points})
+            dy_vals = sorted({gp.dy for gp in grid_points})
+
+            for j, dy in enumerate(dy_vals):
+                for i, dx in enumerate(dx_vals):
+                    if dx in mach_dict:
+                        if dy < mach_dict[dx]:
+                            Pr_above[j, i] = np.nan  # mask from contourf
+                        else:
+                            Pr_below[j, i] = np.nan  # mask from pcolormesh
+
+            # Upper zone: contourf (rings)
+            cf = ax.contourf(X, Y, Pr_above, levels=15, cmap="YlOrRd",
+                             vmin=vmin, vmax=vmax, zorder=1)
+            cs = ax.contour(X, Y, Pr_above, levels=10, colors="black",
+                            linewidths=0.8, zorder=2)
+            ax.clabel(cs, inline=True, fontsize=7, fmt="%.0f kPa")
+
+            # Lower zone: pcolormesh (flat bands)
+            ax.pcolormesh(X, Y, Pr_below, cmap="YlOrRd",
+                          vmin=vmin, vmax=vmax, zorder=1, shading="nearest")
+
+            # Mach curve
+            mach_xs = [dx for dx, _ in mach_curve]
+            mach_ys = [dy for _, dy in mach_curve]
+            ax.plot(mach_xs, mach_ys, "k-", linewidth=2.5, zorder=3, label="Mach stem")
+
+            # Colorbar from contourf
+            self._colorbar = fig.colorbar(cf, ax=ax, fraction=0.046, pad=0.04)
+            self._colorbar.set_label("Pr_α (kPa)", fontsize=9)
+        else:
+            # No Mach stem: pure contourf (surface burst or Mach below facade)
+            cf = ax.contourf(X, Y, Pr, levels=15, cmap="YlOrRd", zorder=1)
+            cs = ax.contour(X, Y, Pr, levels=10, colors="black", linewidths=0.8, zorder=2)
+            ax.clabel(cs, inline=True, fontsize=7, fmt="%.0f kPa")
+            self._colorbar = fig.colorbar(cf, ax=ax, fraction=0.046, pad=0.04)
+            self._colorbar.set_label("Pr_α (kPa)", fontsize=9)
 
         # Building outline
         half_w = width / 2.0
         half_h = height / 2.0
         ax.add_patch(mpatches.Rectangle(
             (-half_w, -half_h), width, height,
-            linewidth=2, edgecolor="black", facecolor="none", zorder=3,
+            linewidth=2, edgecolor="black", facecolor="none", zorder=4,
         ))
 
         # Perpendicular centre marker
-        ax.plot(0.0, 0.0, "ko", markersize=6, zorder=4)
+        ax.plot(0.0, 0.0, "ko", markersize=6, zorder=5)
 
         # Clip view to building bounds with small margin
         margin = max(width, height) * 0.1
@@ -365,10 +419,10 @@ class FriedlanderPanel(QWidget):
     # Public
     # ------------------------------------------------------------------
 
-    def update_point(self, gp: GridPoint, res: BlastPointResult) -> None:
+    def update_point(self, gp: GridPoint, res: BlastPointResult, mach_zone: bool = False) -> None:
         """Redraw the waveform and update all parameter labels."""
         self._draw_waveform(gp, res)
-        self._update_labels(gp, res)
+        self._update_labels(gp, res, mach_zone=mach_zone)
         self._label_placeholder.hide()
         self._param_widget.show()
 
@@ -444,10 +498,11 @@ class FriedlanderPanel(QWidget):
 
         self._canvas.draw_idle()
 
-    def _update_labels(self, gp: GridPoint, res: BlastPointResult) -> None:
-        self._param_labels["coord"].setText(
-            f"Point:  dx = {gp.dx:.2f} m,  dy = {gp.dy:.2f} m"
-        )
+    def _update_labels(self, gp: GridPoint, res: BlastPointResult, mach_zone: bool = False) -> None:
+        coord_text = f"Point:  dx = {gp.dx:.2f} m,  dy = {gp.dy:.2f} m"
+        if mach_zone:
+            coord_text += "  (Mach zone)"
+        self._param_labels["coord"].setText(coord_text)
         self._param_labels["R_alpha"].setText(f"R_α = {gp.R_alpha:.3f} m")
         self._param_labels["alpha"].setText(f"α = {gp.alpha_deg:.2f}°")
         self._param_labels["Ps0"].setText(f"Ps0 = {res.Ps0:.2f} kPa")
@@ -554,7 +609,7 @@ class BlastWindow(QMainWindow):
 
         self._spin_W      = _spinbox("W (kg):",    1.0,    100_000.0,  W,     1)
         self._spin_R      = _spinbox("R (m):",     1.0,    1_000.0,    R,     1)
-        self._spin_Hc     = _spinbox("Hc (m):",    0.1,    100.0,      Hc,    2)
+        self._spin_Hc     = _spinbox("Hc (m):",    0.0,    100.0,      Hc,    2)
         self._spin_width  = _spinbox("Width (m):", 1.0,    200.0,      width, 1)
         self._spin_height = _spinbox("Height (m):",1.0,    200.0,      height,1)
         self._spin_step   = _spinbox("Step (m):",  0.1,    10.0,       step,  2)
@@ -563,6 +618,11 @@ class BlastWindow(QMainWindow):
         self._recalc_btn.setFixedWidth(110)
         self._recalc_btn.clicked.connect(self._recalculate)
         layout.addWidget(self._recalc_btn)
+
+        # Burst type indicator
+        self._burst_type_label = QLabel("")
+        self._burst_type_label.setStyleSheet("font-weight: bold; padding-left: 10px;")
+        layout.addWidget(self._burst_type_label)
 
         layout.addStretch()
         return bar
@@ -608,11 +668,23 @@ class BlastWindow(QMainWindow):
 
         self._grid_points = self._worker.grid_points
         self._result_map  = self._worker.result_map
+        self._mach_curve  = self._worker.mach_curve
         self._width       = self._worker_width
         self._height      = self._worker_height
 
+        # Update burst type label
+        bt = self._worker.burst_type
+        hob = self._worker.scaled_hob
+        if bt == "air":
+            self._burst_type_label.setText(f"Air burst (Hc/W^\u215b = {hob:.2f})")
+            self._burst_type_label.setStyleSheet("font-weight: bold; padding-left: 10px; color: #2060c0;")
+        else:
+            self._burst_type_label.setText(f"Surface burst (Hc/W^\u215b = {hob:.2f})")
+            self._burst_type_label.setStyleSheet("font-weight: bold; padding-left: 10px; color: #c06020;")
+
         self._contour_canvas.draw_contours(
-            self._grid_points, self._result_map, self._width, self._height
+            self._grid_points, self._result_map, self._width, self._height,
+            mach_curve=self._mach_curve,
         )
         self._status.showMessage(
             f"Calculated {len(self._grid_points)} points in {self._worker.elapsed:.2f} s"
@@ -627,10 +699,17 @@ class BlastWindow(QMainWindow):
         gp: GridPoint,
         res: BlastPointResult,
     ) -> None:
-        self._friedlander_panel.update_point(gp, res)
+        # Check if point is in Mach zone
+        mach_zone = False
+        if hasattr(self, '_mach_curve') and self._mach_curve:
+            mach_dict = {dx: mach_dy for dx, mach_dy in self._mach_curve}
+            if gp.dx in mach_dict and gp.dy < mach_dict[gp.dx]:
+                mach_zone = True
+        self._friedlander_panel.update_point(gp, res, mach_zone=mach_zone)
         self._status.showMessage(
             f"Selected point  dx={gp.dx:.1f} m  dy={gp.dy:.1f} m  "
             f"Pr_α={res.Pr_alpha:.1f} kPa"
+            + ("  [Mach zone]" if mach_zone else "")
         )
 
 
