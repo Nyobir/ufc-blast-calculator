@@ -28,7 +28,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QDoubleSpinBox,
@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 from ufc_blast.core.blast_params import (
     BlastPointResult,
     compute_point,
+    compute_points_batch,
     friedlander,
     load_ufc_tables,
 )
@@ -61,16 +62,49 @@ def _compute_results(
     grid_points: list[GridPoint],
     W: float,
 ) -> dict[tuple[float, float], BlastPointResult]:
-    """Compute blast parameters for every (dx, dy) grid point.
+    """Compute blast parameters for every (dx, dy) grid point using vectorized batch.
 
     Returns a mapping  (dx, dy) → BlastPointResult.
     """
+    R_alphas = np.array([gp.R_alpha for gp in grid_points])
+    alpha_degs = np.array([gp.alpha_deg for gp in grid_points])
+    results = compute_points_batch(R_alphas, alpha_degs, W)
+
     result_map: dict[tuple[float, float], BlastPointResult] = {}
-    for gp in grid_points:
+    for gp, res in zip(grid_points, results):
         key = (gp.dx, gp.dy)
         if key not in result_map:
-            result_map[key] = compute_point(gp.R_alpha, gp.alpha_deg, W)
+            result_map[key] = res
     return result_map
+
+
+class _ComputeWorker(QThread):
+    """Background thread for blast computation."""
+
+    finished = Signal(list, dict, float)  # grid_points, result_map, elapsed
+
+    def __init__(self, R, W, Hc, width, height, step):
+        super().__init__()
+        self.R = R
+        self.W = W
+        self.Hc = Hc
+        self.width = width
+        self.height = height
+        self.step = step
+        self.error = None
+
+    def run(self):
+        t0 = time.perf_counter()
+        try:
+            grid_points = generate_grid(
+                self.R, self.W, self.Hc,
+                width=self.width, height=self.height, step=self.step,
+            )
+            result_map = _compute_results(grid_points, self.W)
+            elapsed = time.perf_counter() - t0
+            self.finished.emit(grid_points, result_map, elapsed)
+        except Exception as exc:
+            self.error = str(exc)
 
 
 def _build_meshgrid(
@@ -518,10 +552,10 @@ class BlastWindow(QMainWindow):
         self._spin_height = _spinbox("Height (m):",1.0,    200.0,      height,1)
         self._spin_step   = _spinbox("Step (m):",  0.1,    10.0,       step,  2)
 
-        recalc_btn = QPushButton("Recalculate")
-        recalc_btn.setFixedWidth(110)
-        recalc_btn.clicked.connect(self._recalculate)
-        layout.addWidget(recalc_btn)
+        self._recalc_btn = QPushButton("Recalculate")
+        self._recalc_btn.setFixedWidth(110)
+        self._recalc_btn.clicked.connect(self._recalculate)
+        layout.addWidget(self._recalc_btn)
 
         layout.addStretch()
         return bar
@@ -531,7 +565,7 @@ class BlastWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _recalculate(self) -> None:
-        """Re-run the blast grid computation and refresh the contour plot."""
+        """Launch blast computation in a background thread."""
         W      = self._spin_W.value()
         R      = self._spin_R.value()
         Hc     = self._spin_Hc.value()
@@ -539,28 +573,35 @@ class BlastWindow(QMainWindow):
         height = self._spin_height.value()
         step   = self._spin_step.value()
 
-        t0 = time.perf_counter()
-        try:
-            grid_points = generate_grid(
-                R, W, Hc,
-                width=width,
-                height=height,
-                step=step,
-            )
-        except ValueError as exc:
-            self._status.showMessage(f"Error: {exc}")
-            return
+        # Estimate point count for status feedback
+        if width and height:
+            nx = int(width / step) + 1
+            ny = int(height / step) + 1
+            est = nx * ny
+        else:
+            est = "?"
 
-        result_map = _compute_results(grid_points, W)
-        elapsed = time.perf_counter() - t0
+        self._status.showMessage(f"Computing ~{est} points...")
+        # Disable recalculate button while working
+        self._recalc_btn.setEnabled(False)
+
+        self._worker = _ComputeWorker(R, W, Hc, width, height, step)
+        self._worker.finished.connect(self._on_compute_done)
+        self._worker_width = width
+        self._worker_height = height
+        self._worker.start()
+
+    def _on_compute_done(self, grid_points, result_map, elapsed) -> None:
+        """Called when background computation finishes."""
+        self._recalc_btn.setEnabled(True)
 
         self._grid_points = grid_points
         self._result_map  = result_map
-        self._width       = width
-        self._height      = height
+        self._width       = self._worker_width
+        self._height      = self._worker_height
 
         self._contour_canvas.draw_contours(
-            grid_points, result_map, width, height
+            grid_points, result_map, self._width, self._height
         )
         self._status.showMessage(
             f"Calculated {len(grid_points)} points in {elapsed:.2f} s"

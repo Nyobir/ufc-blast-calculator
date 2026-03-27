@@ -148,6 +148,102 @@ def compute_point(R_alpha: float, alpha_deg: float, W: float) -> BlastPointResul
     )
 
 
+def compute_points_batch(
+    R_alphas: np.ndarray,
+    alpha_degs: np.ndarray,
+    W: float,
+) -> list[BlastPointResult]:
+    """Vectorized computation of blast parameters for many points.
+
+    Much faster than calling compute_point() in a loop — bulk numpy
+    interpolation replaces per-point Python calls.
+
+    Parameters
+    ----------
+    R_alphas : np.ndarray
+        Slant distances (m).
+    alpha_degs : np.ndarray
+        Angles of incidence (degrees).
+    W : float
+        Charge mass (kg TNT equivalent).
+
+    Returns
+    -------
+    list[BlastPointResult]
+        One result per input point.
+    """
+    if not _tables:
+        load_ufc_tables()
+
+    R_alphas = np.asarray(R_alphas, dtype=float)
+    alpha_degs = np.asarray(alpha_degs, dtype=float)
+    n = len(R_alphas)
+
+    W_cbrt = W ** (1.0 / 3.0)
+    Z = R_alphas / W_cbrt
+
+    # Bulk 1D lookups
+    Ps0 = _tables["ps0"].lookup_batch(Z)
+    tA_vals = _tables["tA"].lookup_batch(Z) * W_cbrt / 1000.0
+    t0_vals = _tables["t0"].lookup_batch(Z) * W_cbrt / 1000.0
+
+    # Bulk 2D lookups
+    C_alpha = _tables["calpha"].lookup_batch(alpha_degs, Ps0)
+    Pr_alpha = C_alpha * Ps0
+
+    ir_alpha_scaled = _tables["iralpha"].lookup_batch(alpha_degs, Ps0)
+    ir_alpha = ir_alpha_scaled * W_cbrt / 1000.0
+
+    # Friedlander b — vectorized Newton's method
+    b_vals = _solve_friedlander_b_batch(Pr_alpha, t0_vals, ir_alpha)
+
+    return [
+        BlastPointResult(
+            Ps0=float(Ps0[i]),
+            C_alpha=float(C_alpha[i]),
+            Pr_alpha=float(Pr_alpha[i]),
+            ir_alpha=float(ir_alpha[i]),
+            tA=float(tA_vals[i]),
+            t0=float(t0_vals[i]),
+            b=float(b_vals[i]),
+        )
+        for i in range(n)
+    ]
+
+
+def _solve_friedlander_b_batch(
+    Pr: np.ndarray, t0: np.ndarray, ir: np.ndarray,
+    tol: float = 1e-10, max_iter: int = 100,
+) -> np.ndarray:
+    """Vectorized Friedlander b solver using Newton's method.
+
+    Solves: ir = (Pr * t0) / b^2 * (b - 1 + exp(-b))  for each point.
+    """
+    # Initial guess
+    b = np.full_like(Pr, 2.0)
+
+    for _ in range(max_iter):
+        eb = np.exp(-b)
+        f = (Pr * t0) / (b ** 2) * (b - 1.0 + eb) - ir
+        # df/db = Pr*t0 * [(-2/b^3)(b-1+eb) + (1/b^2)(1-eb)]
+        #       = (Pr*t0/b^3) * [-(2*(b-1+eb)) + b*(1-eb)]
+        #       = (Pr*t0/b^3) * [-2*b + 2 - 2*eb + b - b*eb]
+        #       = (Pr*t0/b^3) * [-b + 2 - (2+b)*eb]
+        df = (Pr * t0 / (b ** 3)) * (-b + 2.0 - (2.0 + b) * eb)
+
+        # Guard against zero derivative
+        safe = np.abs(df) > 1e-30
+        delta = np.where(safe, f / df, 0.0)
+        b = b - delta
+        # Keep b positive
+        b = np.clip(b, 0.01, 50.0)
+
+        if np.all(np.abs(delta) < tol):
+            break
+
+    return b
+
+
 def solve_friedlander_b(Pr_alpha: float, t0: float, ir_alpha: float) -> float:
     """Solve the Friedlander impulse equation for the decay parameter *b*.
 

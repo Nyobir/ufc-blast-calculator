@@ -109,6 +109,29 @@ class Table1D:
         else:
             raise ValueError(f"Unknown method '{method}'. Use 'log' or 'linear'.")
 
+    def lookup_batch(self, x_vals: np.ndarray, method: str = "log") -> np.ndarray:
+        """Vectorized interpolation for an array of query points.
+
+        Parameters
+        ----------
+        x_vals : np.ndarray
+            Array of query points.
+        method : str
+            ``'log'`` or ``'linear'``.
+
+        Returns
+        -------
+        np.ndarray
+            Interpolated values, same shape as *x_vals*.
+        """
+        x_vals = np.asarray(x_vals, dtype=float)
+        if method == "log":
+            log_x = np.log(self.x)
+            log_y = np.log(self.y)
+            return np.exp(np.interp(np.log(x_vals), log_x, log_y))
+        else:
+            return np.interp(x_vals, self.x, self.y)
+
 
 @dataclass
 class Table2D:
@@ -269,3 +292,65 @@ class Table2D:
             return float((1 - t) * val_lo + t * val_hi)
         else:
             raise ValueError(f"Unknown method '{method}'. Use 'log' or 'linear'.")
+
+    def lookup_batch(
+        self, angles: np.ndarray, ps0s: np.ndarray, method: str = "log"
+    ) -> np.ndarray:
+        """Vectorized bivariate interpolation for arrays of (angle, ps0).
+
+        Parameters
+        ----------
+        angles : np.ndarray
+            Angles of incidence (degrees).
+        ps0s : np.ndarray
+            Peak incident overpressures (kPa).
+        method : str
+            ``'log'`` or ``'linear'`` for the Ps0 axis.
+
+        Returns
+        -------
+        np.ndarray
+            Interpolated values, same shape as inputs.
+        """
+        angles = np.asarray(angles, dtype=float)
+        ps0s = np.asarray(ps0s, dtype=float)
+        result = np.empty_like(angles)
+
+        # Clamp angles to safe range
+        all_angle_maxs = [tbl.x[-1] for tbl in self.angle_tables.values()]
+        angle_max = min(all_angle_maxs)
+        angles_clamped = np.clip(angles, 0.0, angle_max)
+
+        # Find bracketing ps0 indices for all points at once
+        idxs = np.searchsorted(self.ps0_levels, ps0s)
+        idxs = np.clip(idxs, 1, len(self.ps0_levels) - 1)
+
+        ps0_lo_arr = self.ps0_levels[idxs - 1]
+        ps0_hi_arr = self.ps0_levels[idxs]
+
+        # Look up values at lo and hi ps0 for each point
+        # Group by (ps0_lo, ps0_hi) pair for efficiency
+        for lo_idx in range(len(self.ps0_levels) - 1):
+            hi_idx = lo_idx + 1
+            mask = idxs == hi_idx
+            if not np.any(mask):
+                continue
+
+            ps0_lo = float(self.ps0_levels[lo_idx])
+            ps0_hi = float(self.ps0_levels[hi_idx])
+            tbl_lo = self.angle_tables[ps0_lo]
+            tbl_hi = self.angle_tables[ps0_hi]
+
+            a_sub = angles_clamped[mask]
+            val_lo = tbl_lo.lookup_batch(a_sub, method="linear")
+            val_hi = tbl_hi.lookup_batch(a_sub, method="linear")
+
+            ps0_sub = ps0s[mask]
+            if method == "log":
+                t = (np.log(ps0_sub) - np.log(ps0_lo)) / (np.log(ps0_hi) - np.log(ps0_lo))
+                result[mask] = np.exp((1 - t) * np.log(val_lo) + t * np.log(val_hi))
+            else:
+                t = (ps0_sub - ps0_lo) / (ps0_hi - ps0_lo)
+                result[mask] = (1 - t) * val_lo + t * val_hi
+
+        return result
