@@ -209,6 +209,38 @@ class Table2D:
         return cls(family_levels=family_levels, x_tables=x_tables)
 
     # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _clamp_x(
+        x: float,
+        tbl: "Table1D | None" = None,
+        *,
+        x_min: float | None = None,
+        x_max: float | None = None,
+    ) -> float:
+        """Clamp *x* to [x_min, x_max] with a warning if out of range."""
+        if tbl is not None:
+            x_min = tbl.x[0]
+            x_max = tbl.x[-1]
+        if x < x_min:
+            warnings.warn(
+                f"x={x} below table minimum {x_min}; clamping.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return x_min
+        if x > x_max:
+            warnings.warn(
+                f"x={x} above table maximum {x_max}; clamping.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return x_max
+        return x
+
+    # ------------------------------------------------------------------
     # Lookup
     # ------------------------------------------------------------------
 
@@ -247,41 +279,31 @@ class Table2D:
                 f"family={family} is outside table range [{fam_min}, {fam_max}]"
             )
 
-        # Determine x bounds across all family slices for clamping
-        all_x_mins = [tbl.x[0] for tbl in self.x_tables.values()]
-        all_x_maxs = [tbl.x[-1] for tbl in self.x_tables.values()]
-        x_min = max(all_x_mins)  # conservative: highest lower bound
-        x_max = min(all_x_maxs)  # conservative: lowest upper bound
-
-        if x < x_min:
-            warnings.warn(
-                f"x={x} below table minimum {x_min}; clamping.",
-                UserWarning,
-                stacklevel=2,
-            )
-            x = x_min
-        elif x > x_max:
-            warnings.warn(
-                f"x={x} above table maximum {x_max}; clamping.",
-                UserWarning,
-                stacklevel=2,
-            )
-            x = x_max
-
         # Find bracketing family levels
         idx = np.searchsorted(self.family_levels, family)
 
         if idx == 0:
-            return self.x_tables[float(self.family_levels[0])].lookup(x, method="linear")
+            tbl = self.x_tables[float(self.family_levels[0])]
+            x = self._clamp_x(x, tbl)
+            return tbl.lookup(x, method="linear")
 
         if idx == len(self.family_levels):
-            return self.x_tables[float(self.family_levels[-1])].lookup(x, method="linear")
+            tbl = self.x_tables[float(self.family_levels[-1])]
+            x = self._clamp_x(x, tbl)
+            return tbl.lookup(x, method="linear")
 
         fam_lo = float(self.family_levels[idx - 1])
         fam_hi = float(self.family_levels[idx])
 
-        val_lo = self.x_tables[fam_lo].lookup(x, method="linear")
-        val_hi = self.x_tables[fam_hi].lookup(x, method="linear")
+        # Clamp x to the overlapping range of the two bracketing families
+        tbl_lo = self.x_tables[fam_lo]
+        tbl_hi = self.x_tables[fam_hi]
+        x_min = max(tbl_lo.x[0], tbl_hi.x[0])
+        x_max = min(tbl_lo.x[-1], tbl_hi.x[-1])
+        x = self._clamp_x(x, x_min=x_min, x_max=x_max)
+
+        val_lo = tbl_lo.lookup(x, method="linear")
+        val_hi = tbl_hi.lookup(x, method="linear")
 
         if method == "log":
             t = (np.log(family) - np.log(fam_lo)) / (np.log(fam_hi) - np.log(fam_lo))
@@ -315,11 +337,6 @@ class Table2D:
         families = np.asarray(families, dtype=float)
         result = np.empty_like(xs)
 
-        # Clamp x values to safe range
-        all_x_maxs = [tbl.x[-1] for tbl in self.x_tables.values()]
-        x_max = min(all_x_maxs)
-        xs_clamped = np.clip(xs, 0.0, x_max)
-
         # Find bracketing family indices for all points at once
         idxs = np.searchsorted(self.family_levels, families)
         idxs = np.clip(idxs, 1, len(self.family_levels) - 1)
@@ -336,7 +353,11 @@ class Table2D:
             tbl_lo = self.x_tables[fam_lo]
             tbl_hi = self.x_tables[fam_hi]
 
-            x_sub = xs_clamped[mask]
+            # Clamp x to the overlapping range of the two bracketing families
+            x_min = max(tbl_lo.x[0], tbl_hi.x[0])
+            x_max = min(tbl_lo.x[-1], tbl_hi.x[-1])
+            x_sub = np.clip(xs[mask], x_min, x_max)
+
             val_lo = tbl_lo.lookup_batch(x_sub, method="linear")
             val_hi = tbl_hi.lookup_batch(x_sub, method="linear")
 
