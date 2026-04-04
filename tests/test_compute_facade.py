@@ -146,3 +146,57 @@ class TestComputeFacadeSurfaceBurst:
             r2 = f2.result_map[key]
             assert r1.Ps0 == r2.Ps0
             assert r1.Pr_alpha == r2.Pr_alpha
+
+
+class TestExtrapolationInFacade:
+    """Tests for extrapolation flag propagation through compute_facade."""
+
+    def test_far_range_facade_has_extrapolated_points(self):
+        """At R=110m, W=200kg, all points should have Ps0 below irAlpha min."""
+        facade = compute_facade(R=110.0, W=200.0, Hc=5.0, width=4.0, height=4.0, step=2.0)
+        extrap_count = sum(
+            1 for res in facade.result_map.values() if res.extrapolated
+        )
+        assert extrap_count > 0, "Expected some extrapolated points at far range"
+
+    def test_close_range_facade_no_extrapolation(self):
+        """At R=30m, W=200kg, no points should be extrapolated."""
+        facade = compute_facade(R=30.0, W=200.0, Hc=5.0, width=10.0, height=8.0, step=2.0)
+        extrap_count = sum(
+            1 for res in facade.result_map.values() if res.extrapolated
+        )
+        assert extrap_count == 0, "No extrapolation expected at R=30m"
+
+    def test_extrapolated_set_contains_table_names(self):
+        """Extrapolated set should contain valid table key strings."""
+        facade = compute_facade(R=110.0, W=200.0, Hc=5.0, width=4.0, height=4.0, step=2.0)
+        valid_keys = {"calpha", "iralpha", "ps0", "tA", "t0",
+                      "surface_ps0", "surface_tA", "surface_t0", "triple_point"}
+        for res in facade.result_map.values():
+            assert res.extrapolated <= valid_keys, (
+                f"Unexpected table keys: {res.extrapolated - valid_keys}"
+            )
+
+    def test_mach_stem_propagates_extrapolation(self):
+        """Mach-overwritten points should inherit donor's extrapolated set."""
+        facade = compute_facade(R=110.0, W=200.0, Hc=5.0, width=4.0, height=4.0, step=2.0)
+        if not facade.mach_curve:
+            pytest.skip("No Mach stem at this range")
+
+        from collections import defaultdict
+        columns = defaultdict(list)
+        for gp in facade.grid_points:
+            columns[gp.dx].append(gp.dy)
+
+        mach_dict = {dx: mach_dy for dx, mach_dy in facade.mach_curve}
+        for dx, mach_dy in mach_dict.items():
+            # Find donor (nearest above Mach line)
+            above = [dy for dy in columns[dx] if dy >= mach_dy]
+            if not above:
+                continue
+            donor_dy = min(above)
+            donor_extrap = facade.result_map[(dx, donor_dy)].extrapolated
+            # All below-Mach points must match donor
+            for dy in columns[dx]:
+                if dy < mach_dy:
+                    assert facade.result_map[(dx, dy)].extrapolated == donor_extrap
