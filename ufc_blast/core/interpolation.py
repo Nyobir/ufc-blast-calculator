@@ -278,19 +278,50 @@ class Table2D:
             raise ValueError(
                 f"family={family} is outside table range [{fam_min}, {fam_max}]"
             )
+        value, _ = self.lookup_flagged(x=x, family=family, method=method)
+        return value
 
-        # Find bracketing family levels
+    def lookup_flagged(
+        self, x: float, family: float, method: str = "log"
+    ) -> tuple[float, bool]:
+        """Bivariate interpolation with out-of-range flag.
+
+        Identical to :meth:`lookup` except that when *family* falls outside
+        the table range the value is clamped to the nearest boundary instead
+        of raising :class:`ValueError`.
+
+        Parameters
+        ----------
+        x : float
+            Lookup variable (e.g. angle in degrees, scaled range).
+        family : float
+            Family parameter (e.g. Ps0 in kPa, scaled Hc).
+        method : str
+            Interpolation method for the family axis (``'log'`` or ``'linear'``).
+
+        Returns
+        -------
+        tuple[float, bool]
+            ``(value, out_of_range)`` where *out_of_range* is ``True`` when
+            *family* was clamped to a table boundary.
+        """
+        fam_min, fam_max = float(self.family_levels[0]), float(self.family_levels[-1])
+        out_of_range = bool(family < fam_min or family > fam_max)
+        if out_of_range:
+            family = float(np.clip(family, fam_min, fam_max))
+
+        # Find bracketing family levels — same logic as lookup()
         idx = np.searchsorted(self.family_levels, family)
 
         if idx == 0:
             tbl = self.x_tables[float(self.family_levels[0])]
             x = self._clamp_x(x, tbl)
-            return tbl.lookup(x, method="linear")
+            return tbl.lookup(x, method="linear"), out_of_range
 
         if idx == len(self.family_levels):
             tbl = self.x_tables[float(self.family_levels[-1])]
             x = self._clamp_x(x, tbl)
-            return tbl.lookup(x, method="linear")
+            return tbl.lookup(x, method="linear"), out_of_range
 
         fam_lo = float(self.family_levels[idx - 1])
         fam_hi = float(self.family_levels[idx])
@@ -307,17 +338,22 @@ class Table2D:
 
         if method == "log":
             t = (np.log(family) - np.log(fam_lo)) / (np.log(fam_hi) - np.log(fam_lo))
-            return float(np.exp((1 - t) * np.log(val_lo) + t * np.log(val_hi)))
+            value = float(np.exp((1 - t) * np.log(val_lo) + t * np.log(val_hi)))
         elif method == "linear":
             t = (family - fam_lo) / (fam_hi - fam_lo)
-            return float((1 - t) * val_lo + t * val_hi)
+            value = float((1 - t) * val_lo + t * val_hi)
         else:
             raise ValueError(f"Unknown method '{method}'. Use 'log' or 'linear'.")
 
-    def lookup_batch(
+        return value, out_of_range
+
+    def lookup_batch_flagged(
         self, xs: np.ndarray, families: np.ndarray, method: str = "log"
-    ) -> np.ndarray:
-        """Vectorized bivariate interpolation for arrays of (x, family).
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Vectorized bivariate interpolation with out-of-range flags.
+
+        Identical to :meth:`lookup_batch` but additionally returns a boolean
+        mask indicating which queries had their *family* value clamped.
 
         Parameters
         ----------
@@ -330,15 +366,21 @@ class Table2D:
 
         Returns
         -------
-        np.ndarray
-            Interpolated values, same shape as inputs.
+        tuple[np.ndarray, np.ndarray]
+            ``(values, out_of_range)`` where *out_of_range* is a boolean
+            array of the same shape as *xs*.
         """
         xs = np.asarray(xs, dtype=float)
         families = np.asarray(families, dtype=float)
+
+        fam_min, fam_max = self.family_levels[0], self.family_levels[-1]
+        out_of_range = (families < fam_min) | (families > fam_max)
+        families_clamped = np.clip(families, fam_min, fam_max)
+
         result = np.empty_like(xs)
 
         # Find bracketing family indices for all points at once
-        idxs = np.searchsorted(self.family_levels, families)
+        idxs = np.searchsorted(self.family_levels, families_clamped)
         idxs = np.clip(idxs, 1, len(self.family_levels) - 1)
 
         # Group by (fam_lo, fam_hi) pair for efficiency
@@ -361,7 +403,7 @@ class Table2D:
             val_lo = tbl_lo.lookup_batch(x_sub, method="linear")
             val_hi = tbl_hi.lookup_batch(x_sub, method="linear")
 
-            fam_sub = families[mask]
+            fam_sub = families_clamped[mask]
             if method == "log":
                 t = (np.log(fam_sub) - np.log(fam_lo)) / (np.log(fam_hi) - np.log(fam_lo))
                 result[mask] = np.exp((1 - t) * np.log(val_lo) + t * np.log(val_hi))
@@ -369,4 +411,26 @@ class Table2D:
                 t = (fam_sub - fam_lo) / (fam_hi - fam_lo)
                 result[mask] = (1 - t) * val_lo + t * val_hi
 
-        return result
+        return result, out_of_range
+
+    def lookup_batch(
+        self, xs: np.ndarray, families: np.ndarray, method: str = "log"
+    ) -> np.ndarray:
+        """Vectorized bivariate interpolation for arrays of (x, family).
+
+        Parameters
+        ----------
+        xs : np.ndarray
+            X-axis query points.
+        families : np.ndarray
+            Family-axis query points.
+        method : str
+            ``'log'`` or ``'linear'`` for the family axis.
+
+        Returns
+        -------
+        np.ndarray
+            Interpolated values, same shape as inputs.
+        """
+        values, _ = self.lookup_batch_flagged(xs, families, method=method)
+        return values

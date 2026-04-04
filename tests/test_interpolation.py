@@ -245,3 +245,69 @@ class TestTable2DLookup:
         result_log = calpha.lookup(x=0.0, family=ps0_mid, method="log")
         result_lin = calpha.lookup(x=0.0, family=ps0_mid, method="linear")
         assert result_log != pytest.approx(result_lin, rel=1e-4)
+
+
+class TestTable2DFlagged:
+    """Tests for extrapolation-aware lookup methods."""
+
+    @pytest.fixture(scope="class")
+    def calpha(self):
+        return Table2D.from_csv(CALPHA_CSV, family_col="ps0_kpa", x_col="angle_deg", value_col="calpha")
+
+    # -- lookup_flagged --
+
+    def test_lookup_flagged_in_range_returns_false(self, calpha):
+        """In-range family should return (value, False)."""
+        val, flag = calpha.lookup_flagged(x=0.0, family=6.89476)
+        assert flag is False
+        assert val > 0.0
+
+    def test_lookup_flagged_below_range_returns_true(self, calpha):
+        """Family below table min should return (value, True), not raise."""
+        fam_min = calpha.family_levels[0]
+        val, flag = calpha.lookup_flagged(x=0.0, family=fam_min * 0.5)
+        assert flag is True
+        assert val > 0.0
+
+    def test_lookup_flagged_above_range_returns_true(self, calpha):
+        """Family above table max should return (value, True), not raise."""
+        fam_max = calpha.family_levels[-1]
+        val, flag = calpha.lookup_flagged(x=0.0, family=fam_max * 2.0)
+        assert flag is True
+        assert val > 0.0
+
+    def test_lookup_flagged_matches_lookup_for_in_range(self, calpha):
+        """Flagged and unflagged must return identical values for in-range queries."""
+        val_flagged, flag = calpha.lookup_flagged(x=10.0, family=6.89476)
+        val_plain = calpha.lookup(x=10.0, family=6.89476)
+        assert val_flagged == pytest.approx(val_plain, rel=1e-12)
+        assert flag is False
+
+    # -- lookup_batch_flagged --
+
+    def test_lookup_batch_flagged_mixed(self, calpha):
+        """Batch with mixed in-range and out-of-range families."""
+        fam_min = calpha.family_levels[0]
+        fam_max = calpha.family_levels[-1]
+        xs = np.array([0.0, 0.0, 0.0])
+        families = np.array([fam_min * 0.5, 6.89476, fam_max * 2.0])
+        vals, flags = calpha.lookup_batch_flagged(xs, families)
+        assert flags[0] is True or flags[0] == True  # below range
+        assert flags[1] is False or flags[1] == False  # in range
+        assert flags[2] is True or flags[2] == True  # above range
+        assert all(v > 0.0 for v in vals)
+
+    def test_lookup_batch_flagged_all_in_range(self, calpha):
+        """All in-range families should produce all-False mask."""
+        xs = np.array([0.0, 10.0, 20.0])
+        families = np.array([6.89476, 68.9476, 689.476])
+        vals, flags = calpha.lookup_batch_flagged(xs, families)
+        assert not np.any(flags)
+
+    def test_lookup_batch_flagged_values_match_unflagged(self, calpha):
+        """Flagged batch values must match unflagged batch for same inputs."""
+        xs = np.array([0.0, 10.0, 20.0])
+        families = np.array([6.89476, 68.9476, 689.476])
+        vals_flagged, _ = calpha.lookup_batch_flagged(xs, families)
+        vals_plain = calpha.lookup_batch(xs, families)
+        np.testing.assert_allclose(vals_flagged, vals_plain, rtol=1e-12)
