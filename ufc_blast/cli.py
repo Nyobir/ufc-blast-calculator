@@ -77,6 +77,10 @@ def _print_point_result(result: Any, W: float, R: float, alpha_deg: float, R_alp
     print(f"  Positive duration t0   : {result.t0 * 1000:.3f} ms")
     print(f"  Friedlander b          : {result.b:.4f}")
     print(sep)
+    if result.extrapolated:
+        tables = ", ".join(sorted(result.extrapolated))
+        print(f"  \u26a0 EXTRAPOLATED: {tables} (Ps0 outside table range)")
+        print(sep)
 
 
 def _result_to_dict(gp: Any, result: Any) -> dict[str, Any]:
@@ -93,6 +97,7 @@ def _result_to_dict(gp: Any, result: Any) -> dict[str, Any]:
         "tA_ms": round(result.tA * 1000.0, 4),
         "t0_ms": round(result.t0 * 1000.0, 4),
         "b": round(result.b, 6),
+        "extrapolated": ",".join(sorted(result.extrapolated)),
     }
 
 
@@ -108,6 +113,7 @@ _TABLE_COLUMNS = [
     ("tA_ms",         "tA(ms)",     9),
     ("t0_ms",         "t0(ms)",     9),
     ("b",             "b",          8),
+    ("extrapolated",  "extrap.",    12),
 ]
 
 
@@ -199,6 +205,16 @@ def _cmd_compute(args: argparse.Namespace) -> int:
         _print_json(rows)
     else:
         _print_table(rows)
+
+    # Extrapolation summary
+    extrap_rows = [r for r in rows if r["extrapolated"]]
+    if extrap_rows:
+        all_tables: set[str] = set()
+        for r in extrap_rows:
+            all_tables.update(r["extrapolated"].split(","))
+        print(f"  \u26a0 {len(extrap_rows)} of {len(rows)} points extrapolated "
+              f"(outside UFC table range)")
+        print(f"    Affected tables: {', '.join(sorted(all_tables))}")
 
     return 0
 
