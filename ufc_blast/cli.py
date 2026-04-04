@@ -233,6 +233,70 @@ def _cmd_gui_check(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_batch(args: argparse.Namespace) -> int:
+    """Compute blast parameters for multiple angles of incidence."""
+    import numpy as np
+    from ufc_blast.core.blast_params import compute_points_batch, load_ufc_tables
+    from ufc_blast.core.geometry import determine_burst_type
+
+    load_ufc_tables()
+    burst_type, scaled_hob = determine_burst_type(args.Hc, args.W)
+    label = "Air burst" if burst_type == "air" else "Surface burst"
+    print(f"  Burst type: {label} (Hc/W^(1/3) = {scaled_hob:.4f})", file=sys.stderr)
+
+    alpha_degs = [float(a.strip()) for a in args.alphas.split(",")]
+    R_alphas = [_r_alpha_from_angle(args.R, a) for a in alpha_degs]
+
+    try:
+        results = compute_points_batch(
+            np.array(R_alphas),
+            np.array(alpha_degs),
+            args.W,
+            burst_type=burst_type,
+        )
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    _BATCH_FIELDS = [
+        "alpha_deg", "R_alpha_m", "Ps0_kPa", "C_alpha",
+        "Pr_alpha_kPa", "ir_alpha_kPa_ms", "tA_ms", "t0_ms", "b",
+    ]
+
+    rows: list[dict[str, Any]] = []
+    for alpha, r_alpha, res in zip(alpha_degs, R_alphas, results):
+        rows.append({
+            "alpha_deg": round(alpha, 4),
+            "R_alpha_m": round(r_alpha, 4),
+            "Ps0_kPa": round(res.Ps0, 4),
+            "C_alpha": round(res.C_alpha, 6),
+            "Pr_alpha_kPa": round(res.Pr_alpha, 4),
+            "ir_alpha_kPa_ms": round(res.ir_alpha * 1000.0, 4),
+            "tA_ms": round(res.tA * 1000.0, 4),
+            "t0_ms": round(res.t0 * 1000.0, 4),
+            "b": round(res.b, 6),
+        })
+
+    fmt = args.format
+    output_path = args.output
+
+    if output_path:
+        # Write to file (always CSV for file output)
+        with open(output_path, "w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=_BATCH_FIELDS)
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"Batch results written to {output_path}", file=sys.stderr)
+    elif fmt == "csv":
+        writer = csv.DictWriter(sys.stdout, fieldnames=_BATCH_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+    else:
+        print(json.dumps(rows, indent=2))
+
+    return 0
+
+
 def _cmd_gui(args: argparse.Namespace) -> int:
     try:
         from ufc_blast.gui import launch_gui
@@ -350,6 +414,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Verify GUI dependencies load correctly (CI smoke test).",
     )
     p_check.set_defaults(func=_cmd_gui_check)
+
+    # ------------------------------------------------------------------
+    # batch
+    # ------------------------------------------------------------------
+    p_batch = sub.add_parser(
+        "batch",
+        help="Compute blast parameters for multiple angles of incidence.",
+        description=(
+            "Compute UFC 3-340-02 reflected blast parameters at a single "
+            "standoff distance for several angles of incidence in one call."
+        ),
+    )
+    p_batch.add_argument("--W", type=float, required=True, metavar="kg",
+                         help="Charge mass (kg TNT equivalent).")
+    p_batch.add_argument("--R", type=float, required=True, metavar="m",
+                         help="Perpendicular standoff distance (m).")
+    p_batch.add_argument("--Hc", type=float, required=True, metavar="m",
+                         help="Height of burst above ground (m).")
+    p_batch.add_argument("--alphas", type=str, required=True, metavar="DEGS",
+                         help="Comma-separated angles of incidence in degrees.")
+    p_batch.add_argument("--format", choices=["json", "csv"], default="json",
+                         help="Output format (default: json).")
+    p_batch.add_argument("-o", "--output", type=str, default=None, metavar="FILE",
+                         help="Write results to file instead of stdout.")
+    p_batch.set_defaults(func=_cmd_batch)
 
     return parser
 
