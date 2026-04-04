@@ -125,6 +125,23 @@ def _build_meshgrid(
     return X, Y, Pr
 
 
+def _build_extrap_mask(
+    grid_points: list[GridPoint],
+    result_map: dict[tuple[float, float], BlastPointResult],
+) -> np.ndarray:
+    """Build a 2D boolean array: True where a point is extrapolated."""
+    dx_vals = sorted({gp.dx for gp in grid_points})
+    dy_vals = sorted({gp.dy for gp in grid_points})
+    nx, ny = len(dx_vals), len(dy_vals)
+
+    mask = np.array(
+        [bool(result_map[(dx, dy)].extrapolated) for dy in dy_vals for dx in dx_vals],
+        dtype=bool,
+    ).reshape(ny, nx)
+
+    return mask
+
+
 def _nearest_point(
     click_dx: float,
     click_dy: float,
@@ -205,6 +222,25 @@ class ContourCanvas(FigureCanvas):
             mach_ys = [dy for _, dy in mach_curve]
             ax.plot(mach_xs, mach_ys, color="white", linewidth=2.0,
                     linestyle="--", zorder=3, label="Mach stem")
+
+        # Extrapolation hatched overlay
+        extrap_mask = _build_extrap_mask(grid_points, result_map)
+        if np.any(extrap_mask):
+            ax.contourf(
+                X, Y, extrap_mask.astype(float),
+                levels=[0.5, 1.5],
+                colors="none",
+                hatches=["///"],
+                zorder=4,
+            )
+            ax.contour(
+                X, Y, extrap_mask.astype(float),
+                levels=[0.5],
+                colors="gray",
+                linewidths=1.0,
+                linestyles="--",
+                zorder=4,
+            )
 
         # Perpendicular centre marker
         ax.plot(0.0, 0.0, "ko", markersize=6, zorder=5)
@@ -427,6 +463,9 @@ class FriedlanderPanel(QWidget):
         coord_text = f"Point:  dx = {gp.dx:.2f} m,  dy = {gp.dy:.2f} m"
         if mach_zone:
             coord_text += "  (Mach zone)"
+        if res.extrapolated:
+            tables = ", ".join(sorted(res.extrapolated))
+            coord_text += f"  (\u26a0 extrapolated: {tables})"
         self._param_labels["coord"].setText(coord_text)
         self._param_labels["R_alpha"].setText(f"R_α = {gp.R_alpha:.3f} m")
         self._param_labels["alpha"].setText(f"α = {gp.alpha_deg:.2f}°")
@@ -648,6 +687,7 @@ class BlastWindow(QMainWindow):
             f"Selected point  dx={gp.dx:.1f} m  dy={gp.dy:.1f} m  "
             f"Pr_α={res.Pr_alpha:.1f} kPa"
             + ("  [Mach zone]" if mach_zone else "")
+            + (f"  [\u26a0 extrapolated: {', '.join(sorted(res.extrapolated))}]" if res.extrapolated else "")
         )
 
 
