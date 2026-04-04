@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -52,6 +52,10 @@ class BlastPointResult:
         Positive phase duration (s).
     b : float
         Friedlander exponential decay parameter (dimensionless).
+    extrapolated : set[str]
+        Names of 2D tables where family (Ps0) was outside the data range
+        and the result was extrapolated.  Empty set when all lookups are
+        within range.
     """
 
     Ps0: float
@@ -61,6 +65,7 @@ class BlastPointResult:
     tA: float
     t0: float
     b: float
+    extrapolated: set[str] = field(default_factory=set)
 
 
 # Module-level table cache — populated once by load_ufc_tables()
@@ -160,12 +165,18 @@ def compute_point(R_alpha: float, alpha_deg: float, W: float, burst_type: str = 
     # Incident overpressure
     Ps0 = ps0_table.lookup(Z)
 
+    extrapolated: set[str] = set()
+
     # Reflection coefficient from Figure 2-193 (shared across burst types)
-    C_alpha = _tables["calpha"].lookup(x=alpha_deg, family=Ps0)
+    C_alpha, oor_calpha = _tables["calpha"].lookup_flagged(x=alpha_deg, family=Ps0)
+    if oor_calpha:
+        extrapolated.add("calpha")
     Pr_alpha = C_alpha * Ps0
 
     # Reflected specific impulse from Figure 2-194 (kPa·ms/kg^1/3 → kPa·s)
-    ir_alpha_scaled = _tables["iralpha"].lookup(x=alpha_deg, family=Ps0)
+    ir_alpha_scaled, oor_iralpha = _tables["iralpha"].lookup_flagged(x=alpha_deg, family=Ps0)
+    if oor_iralpha:
+        extrapolated.add("iralpha")
     ir_alpha = ir_alpha_scaled * W_cbrt / 1000.0
 
     # Arrival time (ms/kg^1/3 → s)
@@ -185,6 +196,7 @@ def compute_point(R_alpha: float, alpha_deg: float, W: float, burst_type: str = 
         tA=tA,
         t0=t0,
         b=b,
+        extrapolated=extrapolated,
     )
 
 
@@ -233,11 +245,11 @@ def compute_points_batch(
     tA_vals = tA_table.lookup_batch(Z) * W_cbrt / 1000.0
     t0_vals = t0_table.lookup_batch(Z) * W_cbrt / 1000.0
 
-    # Bulk 2D lookups
-    C_alpha = _tables["calpha"].lookup_batch(xs=alpha_degs, families=Ps0)
+    # Bulk 2D lookups (flagged to track out-of-range extrapolation)
+    C_alpha, oor_calpha = _tables["calpha"].lookup_batch_flagged(xs=alpha_degs, families=Ps0)
     Pr_alpha = C_alpha * Ps0
 
-    ir_alpha_scaled = _tables["iralpha"].lookup_batch(xs=alpha_degs, families=Ps0)
+    ir_alpha_scaled, oor_iralpha = _tables["iralpha"].lookup_batch_flagged(xs=alpha_degs, families=Ps0)
     ir_alpha = ir_alpha_scaled * W_cbrt / 1000.0
 
     # Friedlander b — vectorized Newton's method
@@ -252,6 +264,10 @@ def compute_points_batch(
             tA=float(tA_vals[i]),
             t0=float(t0_vals[i]),
             b=float(b_vals[i]),
+            extrapolated=(
+                ({"calpha"} if oor_calpha[i] else set())
+                | ({"iralpha"} if oor_iralpha[i] else set())
+            ),
         )
         for i in range(n)
     ]

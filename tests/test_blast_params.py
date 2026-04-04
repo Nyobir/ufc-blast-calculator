@@ -209,9 +209,11 @@ class TestComputePoint:
         assert result_far.tA > result_near.tA
 
     def test_result_fields_are_finite(self):
-        """All result fields must be finite floats."""
+        """All numeric result fields must be finite floats."""
         result = compute_point(R_alpha=45.0, alpha_deg=20.0, W=200.0)
         for field_name, value in result.__dict__.items():
+            if field_name == "extrapolated":
+                continue
             assert math.isfinite(value), f"Field {field_name} is not finite: {value}"
 
 
@@ -255,3 +257,42 @@ class TestSurfaceBurstComputation:
         result_default = compute_point(R_alpha=30.0, alpha_deg=0.0, W=200.0)
         result_air = compute_point(R_alpha=30.0, alpha_deg=0.0, W=200.0, burst_type="air")
         assert result_default.Ps0 == result_air.Ps0
+
+
+# ===========================================================================
+# TestExtrapolationFlags
+# ===========================================================================
+
+
+class TestExtrapolationFlags:
+    """Tests for the extrapolated field on BlastPointResult."""
+
+    def test_normal_range_has_empty_extrapolated(self):
+        """W=200kg, R=30m — well within all table ranges."""
+        result = compute_point(R_alpha=30.0, alpha_deg=0.0, W=200.0)
+        assert result.extrapolated == set()
+
+    def test_far_range_flags_iralpha(self):
+        """R=120m, W=200kg → Ps0 ≈ 4.24 kPa, below irAlpha min (4.83 kPa)."""
+        result = compute_point(R_alpha=120.0, alpha_deg=0.0, W=200.0)
+        assert "iralpha" in result.extrapolated
+
+    def test_far_range_does_not_crash(self):
+        """compute_point must not raise ValueError for out-of-range Ps0."""
+        result = compute_point(R_alpha=120.0, alpha_deg=0.0, W=200.0)
+        assert isinstance(result, BlastPointResult)
+        assert result.Ps0 > 0.0
+        assert result.ir_alpha > 0.0
+
+    def test_batch_matches_single_extrapolation_flag(self):
+        """Batch and single compute must agree on extrapolation flags."""
+        import numpy as np
+        R_alphas = np.array([30.0, 120.0])
+        alpha_degs = np.array([0.0, 0.0])
+        batch = compute_points_batch(R_alphas, alpha_degs, W=200.0)
+
+        single_near = compute_point(R_alpha=30.0, alpha_deg=0.0, W=200.0)
+        single_far = compute_point(R_alpha=120.0, alpha_deg=0.0, W=200.0)
+
+        assert batch[0].extrapolated == single_near.extrapolated
+        assert batch[1].extrapolated == single_far.extrapolated
