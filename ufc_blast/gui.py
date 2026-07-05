@@ -245,11 +245,12 @@ class ContourCanvas(FigureCanvas):
         # Perpendicular centre marker
         ax.plot(0.0, 0.0, "ko", markersize=6, zorder=5)
 
-        # Clip view to data bounds (no margin — avoids visible contourf edge)
-        half_w = width / 2.0
-        half_h = height / 2.0
-        ax.set_xlim(-half_w, half_w)
-        ax.set_ylim(-half_h, half_h)
+        # Clip view to data bounds (no margin — avoids visible contourf edge).
+        # The grid rests on the ground plane: dy spans [-Hc, height - Hc].
+        dxs = [gp.dx for gp in grid_points]
+        dys = [gp.dy for gp in grid_points]
+        ax.set_xlim(min(dxs), max(dxs))
+        ax.set_ylim(min(dys), max(dys))
 
         ax.set_xlabel("Horizontal offset (m)", fontsize=9)
         ax.set_ylabel("Vertical offset (m)", fontsize=9)
