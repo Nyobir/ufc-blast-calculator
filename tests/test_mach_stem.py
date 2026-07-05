@@ -95,3 +95,29 @@ class TestApplyMachStem:
         grid_points, result_map = self._make_grid_and_results(R=500.0, width=2.0, height=2.0)
         new_map, mach_curve = apply_mach_stem(grid_points, result_map, W=200.0, Hc=5.0, R=500.0)
         assert isinstance(mach_curve, list)
+
+    def test_mach_values_independent_of_facade_extent(self):
+        """Mach-zone values must not depend on facade height or grid step.
+
+        Regression test: the merged-front parameters are evaluated at the
+        triple-point height itself, so the corrected value at a fixed
+        physical point is invariant to the user-chosen facade extent.
+        """
+        from ufc_blast.core.blast_params import compute_facade
+
+        centre_values = []
+        for height in (6.0, 10.0, 16.0):
+            facade = compute_facade(
+                R=30.0, W=200.0, Hc=5.0, width=20.0, height=height, step=0.5,
+            )
+            res = facade.result_map[(0.0, 0.0)]
+            centre_values.append(
+                (res.Pr_alpha, res.Ps0, res.ir_alpha, res.tA, res.t0, res.b)
+            )
+
+        for vals in centre_values[1:]:
+            for got, ref in zip(vals, centre_values[0]):
+                assert abs(got - ref) < 1e-9, (
+                    f"Mach-corrected centre value changed with facade "
+                    f"height: {vals} vs {centre_values[0]}"
+                )

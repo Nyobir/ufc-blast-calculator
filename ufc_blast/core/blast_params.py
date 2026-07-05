@@ -547,24 +547,26 @@ def apply_mach_stem(
 
         mach_curve.append((dx, mach_dy))
 
-        # Find the blast result at the Mach height by interpolating between
-        # the two nearest grid points above and below mach_dy
         dy_arr = np.array(dy_list)
-        above_mask = dy_arr >= mach_dy
         below_mask = dy_arr < mach_dy
 
         if not np.any(below_mask):
             # Mach line is below all grid points — no correction needed
             continue
 
-        if not np.any(above_mask):
-            # Entire column is in Mach zone — use the topmost point
-            top_dy = dy_list[-1]
-            mach_result = result_map[(dx, top_dy)]
-        else:
-            # Interpolate: find nearest point at or above mach_dy
-            above_dy = float(dy_arr[above_mask][0])  # smallest dy >= mach_dy
-            mach_result = result_map[(dx, above_dy)]
+        # Evaluate the merged-front parameters exactly at the triple-point
+        # height (dx, mach_dy) through the pointwise pipeline, so the Mach
+        # correction is independent of the facade extent and grid step.
+        R_alpha_mach = math.sqrt(R ** 2 + dx ** 2 + mach_dy ** 2)
+        alpha_mach = math.degrees(math.acos(min(1.0, R / R_alpha_mach)))
+        try:
+            mach_result = compute_point(
+                R_alpha_mach, alpha_mach, W, burst_type="air",
+            )
+        except ValueError:
+            # Triple-point height lies outside the chart-supported range —
+            # leave the regular-reflection values for this column.
+            continue
 
         # Overwrite all points below the Mach line
         for dy in dy_list:
