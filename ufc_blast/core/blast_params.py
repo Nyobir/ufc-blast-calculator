@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import sys
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -162,10 +163,12 @@ def compute_point(R_alpha: float, alpha_deg: float, W: float, burst_type: str = 
     tA_table = _tables["surface_tA"] if burst_type == "surface" else _tables["tA"]
     t0_table = _tables["surface_t0"] if burst_type == "surface" else _tables["t0"]
 
-    # Incident overpressure
-    Ps0 = ps0_table.lookup(Z)
-
     extrapolated: set[str] = set()
+
+    # Incident overpressure
+    Ps0, oor_ps0 = ps0_table.lookup_flagged(Z)
+    if oor_ps0:
+        extrapolated.add("ps0")
 
     # Reflection coefficient from Figure 2-193 (shared across burst types)
     C_alpha, oor_calpha = _tables["calpha"].lookup_flagged(x=alpha_deg, family=Ps0)
@@ -180,10 +183,16 @@ def compute_point(R_alpha: float, alpha_deg: float, W: float, burst_type: str = 
     ir_alpha = ir_alpha_scaled * W_cbrt / 1000.0
 
     # Arrival time (ms/kg^1/3 → s)
-    tA = tA_table.lookup(Z) * W_cbrt / 1000.0
+    tA_scaled, oor_tA = tA_table.lookup_flagged(Z)
+    if oor_tA:
+        extrapolated.add("tA")
+    tA = tA_scaled * W_cbrt / 1000.0
 
     # Positive phase duration (ms/kg^1/3 → s)
-    t0 = t0_table.lookup(Z) * W_cbrt / 1000.0
+    t0_scaled, oor_t0 = t0_table.lookup_flagged(Z)
+    if oor_t0:
+        extrapolated.add("t0")
+    t0 = t0_scaled * W_cbrt / 1000.0
 
     # Friedlander decay parameter
     b = solve_friedlander_b(Pr_alpha, t0, ir_alpha)
@@ -240,10 +249,12 @@ def compute_points_batch(
     tA_table = _tables["surface_tA"] if burst_type == "surface" else _tables["tA"]
     t0_table = _tables["surface_t0"] if burst_type == "surface" else _tables["t0"]
 
-    # Bulk 1D lookups
-    Ps0 = ps0_table.lookup_batch(Z)
-    tA_vals = tA_table.lookup_batch(Z) * W_cbrt / 1000.0
-    t0_vals = t0_table.lookup_batch(Z) * W_cbrt / 1000.0
+    # Bulk 1D lookups (flagged: out-of-range Z clamps to the chart boundary)
+    Ps0, oor_ps0 = ps0_table.lookup_batch_flagged(Z)
+    tA_scaled, oor_tA = tA_table.lookup_batch_flagged(Z)
+    tA_vals = tA_scaled * W_cbrt / 1000.0
+    t0_scaled, oor_t0 = t0_table.lookup_batch_flagged(Z)
+    t0_vals = t0_scaled * W_cbrt / 1000.0
 
     # Bulk 2D lookups (flagged to track out-of-range extrapolation)
     C_alpha, oor_calpha = _tables["calpha"].lookup_batch_flagged(xs=alpha_degs, families=Ps0)
@@ -265,8 +276,11 @@ def compute_points_batch(
             t0=float(t0_vals[i]),
             b=float(b_vals[i]),
             extrapolated=(
-                ({"calpha"} if oor_calpha[i] else set())
+                ({"ps0"} if oor_ps0[i] else set())
+                | ({"calpha"} if oor_calpha[i] else set())
                 | ({"iralpha"} if oor_iralpha[i] else set())
+                | ({"tA"} if oor_tA[i] else set())
+                | ({"t0"} if oor_t0[i] else set())
             ),
         )
         for i in range(n)
@@ -334,7 +348,24 @@ def solve_friedlander_b(Pr_alpha: float, t0: float, ir_alpha: float) -> float:
     def _residual(b: float) -> float:
         return (Pr_alpha * t0) / (b ** 2) * (b - 1.0 + math.exp(-b)) - ir_alpha
 
-    return float(brentq(_residual, 0.01, 50.0))
+    b_lo, b_hi = 0.01, 50.0
+    r_lo, r_hi = _residual(b_lo), _residual(b_hi)
+    if r_lo * r_hi > 0.0:
+        # No root inside the bracket: the chart-derived (Pr, t0, ir) triple
+        # is not impulse-consistent for any admissible b. This only occurs
+        # for chart-boundary-clamped (flagged) inputs; return the bracket
+        # end with the smaller residual, mirroring the clipping behaviour
+        # of the vectorized Newton solver.
+        warnings.warn(
+            f"No Friedlander b in [{b_lo}, {b_hi}] matches the chart "
+            f"impulse (Pr={Pr_alpha:.4g} kPa, t0={t0:.4g} s, "
+            f"ir={ir_alpha:.4g} kPa s); clipping to the bracket boundary.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return b_lo if abs(r_lo) <= abs(r_hi) else b_hi
+
+    return float(brentq(_residual, b_lo, b_hi))
 
 
 def friedlander(
@@ -534,12 +565,23 @@ def apply_mach_stem(
         Rg = math.sqrt(R ** 2 + dx ** 2)
         Rg_scaled = Rg / W_cbrt
 
-        # Look up triple point height
-        try:
-            HT_scaled = triple_table.lookup(x=Rg_scaled, family=Hc_scaled)
-        except (ValueError, KeyError):
-            # Rg_scaled or Hc_scaled outside table range — no Mach stem here
+        # Look up triple point height. An out-of-range scaled ground
+        # distance clamps to the digitized Figure 2-13 boundary; the whole
+        # column is then flagged, because the clamped triple-point height
+        # decides the Mach/regular classification of every point in it.
+        # A scaled burst height outside the digitized family range means
+        # there is no triple-point data at all — no Mach treatment.
+        fam_min = float(triple_table.family_levels[0])
+        fam_max = float(triple_table.family_levels[-1])
+        if not (fam_min <= Hc_scaled <= fam_max):
             continue
+        HT_scaled, tp_clamped = triple_table.lookup_flagged(
+            x=Rg_scaled, family=Hc_scaled
+        )
+
+        if tp_clamped:
+            for dy in dy_list:
+                result_map[(dx, dy)].extrapolated.add("triple_point")
 
         HT = HT_scaled * W_cbrt
         # Convert to facade coordinate: dy=0 is at burst height, ground at dy=-Hc
@@ -568,7 +610,10 @@ def apply_mach_stem(
             # leave the regular-reflection values for this column.
             continue
 
-        # Overwrite all points below the Mach line
+        # Overwrite all points below the Mach line, carrying over the
+        # column's triple-point clamp flag if it was set.
+        if tp_clamped:
+            mach_result.extrapolated.add("triple_point")
         for dy in dy_list:
             if dy < mach_dy:
                 result_map[(dx, dy)] = mach_result

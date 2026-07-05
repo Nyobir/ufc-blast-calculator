@@ -109,6 +109,54 @@ class Table1D:
         else:
             raise ValueError(f"Unknown method '{method}'. Use 'log' or 'linear'.")
 
+    def lookup_flagged(self, x_val: float, method: str = "log") -> tuple[float, bool]:
+        """Interpolate at *x_val*, clamping to the table range with a flag.
+
+        Identical to :meth:`lookup` except that an out-of-range query does
+        not raise: the coordinate is clamped to the nearest table boundary,
+        a :class:`UserWarning` is emitted, and the returned flag is ``True``.
+
+        Returns
+        -------
+        tuple[float, bool]
+            ``(value, out_of_range)``.
+        """
+        x_min, x_max = float(self.x[0]), float(self.x[-1])
+        out_of_range = x_val < x_min or x_val > x_max
+        if out_of_range:
+            clamped = min(max(x_val, x_min), x_max)
+            warnings.warn(
+                f"x={x_val} outside table range [{x_min}, {x_max}]; clamping.",
+                UserWarning,
+                stacklevel=2,
+            )
+            x_val = clamped
+        return self.lookup(x_val, method=method), out_of_range
+
+    def lookup_batch_flagged(
+        self, x_vals: np.ndarray, method: str = "log"
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Vectorized :meth:`lookup_flagged`.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            ``(values, out_of_range)`` — values with out-of-range queries
+            clamped to the table boundary, and a boolean mask marking
+            which queries were clamped.
+        """
+        x_vals = np.asarray(x_vals, dtype=float)
+        x_min, x_max = float(self.x[0]), float(self.x[-1])
+        flags = (x_vals < x_min) | (x_vals > x_max)
+        if np.any(flags):
+            warnings.warn(
+                f"{int(np.sum(flags))} of {x_vals.size} queries outside table "
+                f"range [{x_min}, {x_max}]; clamping.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return self.lookup_batch(np.clip(x_vals, x_min, x_max), method=method), flags
+
     def lookup_batch(self, x_vals: np.ndarray, method: str = "log") -> np.ndarray:
         """Vectorized interpolation for an array of query points.
 
@@ -219,8 +267,11 @@ class Table2D:
         *,
         x_min: float | None = None,
         x_max: float | None = None,
-    ) -> float:
-        """Clamp *x* to [x_min, x_max] with a warning if out of range."""
+    ) -> tuple[float, bool]:
+        """Clamp *x* to [x_min, x_max] with a warning if out of range.
+
+        Returns ``(x, clamped)`` so callers can propagate the flag.
+        """
         if tbl is not None:
             x_min = tbl.x[0]
             x_max = tbl.x[-1]
@@ -230,15 +281,15 @@ class Table2D:
                 UserWarning,
                 stacklevel=3,
             )
-            return x_min
+            return x_min, True
         if x > x_max:
             warnings.warn(
                 f"x={x} above table maximum {x_max}; clamping.",
                 UserWarning,
                 stacklevel=3,
             )
-            return x_max
-        return x
+            return x_max, True
+        return x, False
 
     # ------------------------------------------------------------------
     # Lookup
@@ -303,7 +354,7 @@ class Table2D:
         -------
         tuple[float, bool]
             ``(value, out_of_range)`` where *out_of_range* is ``True`` when
-            *family* was clamped to a table boundary.
+            either *family* or *x* was clamped to a table boundary.
         """
         fam_min, fam_max = float(self.family_levels[0]), float(self.family_levels[-1])
         out_of_range = bool(family < fam_min or family > fam_max)
@@ -315,13 +366,13 @@ class Table2D:
 
         if idx == 0:
             tbl = self.x_tables[float(self.family_levels[0])]
-            x = self._clamp_x(x, tbl)
-            return tbl.lookup(x, method="linear"), out_of_range
+            x, x_clamped = self._clamp_x(x, tbl)
+            return tbl.lookup(x, method="linear"), out_of_range or x_clamped
 
         if idx == len(self.family_levels):
             tbl = self.x_tables[float(self.family_levels[-1])]
-            x = self._clamp_x(x, tbl)
-            return tbl.lookup(x, method="linear"), out_of_range
+            x, x_clamped = self._clamp_x(x, tbl)
+            return tbl.lookup(x, method="linear"), out_of_range or x_clamped
 
         fam_lo = float(self.family_levels[idx - 1])
         fam_hi = float(self.family_levels[idx])
@@ -331,7 +382,8 @@ class Table2D:
         tbl_hi = self.x_tables[fam_hi]
         x_min = max(tbl_lo.x[0], tbl_hi.x[0])
         x_max = min(tbl_lo.x[-1], tbl_hi.x[-1])
-        x = self._clamp_x(x, x_min=x_min, x_max=x_max)
+        x, x_clamped = self._clamp_x(x, x_min=x_min, x_max=x_max)
+        out_of_range = out_of_range or x_clamped
 
         val_lo = tbl_lo.lookup(x, method="linear")
         val_hi = tbl_hi.lookup(x, method="linear")
@@ -353,7 +405,8 @@ class Table2D:
         """Vectorized bivariate interpolation with out-of-range flags.
 
         Identical to :meth:`lookup_batch` but additionally returns a boolean
-        mask indicating which queries had their *family* value clamped.
+        mask indicating which queries had their *family* or *x* value
+        clamped to a table boundary.
 
         Parameters
         ----------
@@ -398,7 +451,9 @@ class Table2D:
             # Clamp x to the overlapping range of the two bracketing families
             x_min = max(tbl_lo.x[0], tbl_hi.x[0])
             x_max = min(tbl_lo.x[-1], tbl_hi.x[-1])
-            x_sub = np.clip(xs[mask], x_min, x_max)
+            x_raw = xs[mask]
+            out_of_range[mask] |= (x_raw < x_min) | (x_raw > x_max)
+            x_sub = np.clip(x_raw, x_min, x_max)
 
             val_lo = tbl_lo.lookup_batch(x_sub, method="linear")
             val_hi = tbl_hi.lookup_batch(x_sub, method="linear")

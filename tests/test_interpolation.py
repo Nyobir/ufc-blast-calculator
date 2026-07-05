@@ -311,3 +311,42 @@ class TestTable2DFlagged:
         vals_flagged, _ = calpha.lookup_batch_flagged(xs, families)
         vals_plain = calpha.lookup_batch(xs, families)
         np.testing.assert_allclose(vals_flagged, vals_plain, rtol=1e-12)
+
+
+class TestTable1DFlagged:
+    """Flagged 1D lookups: clamp to the table boundary and report it."""
+
+    @pytest.fixture(scope="class")
+    def incident_table(self):
+        return Table1D.from_csv(INCIDENT_CSV, "z_m_kg13", "ps0_kpa")
+
+    def test_in_range_matches_lookup_and_no_flag(self, incident_table):
+        x = float(incident_table.x[5])
+        val, flag = incident_table.lookup_flagged(x)
+        assert val == pytest.approx(incident_table.lookup(x))
+        assert flag is False
+
+    def test_above_range_clamps_and_flags(self, incident_table):
+        x_max = float(incident_table.x[-1])
+        val, flag = incident_table.lookup_flagged(x_max * 10.0)
+        assert val == pytest.approx(float(incident_table.y[-1]))
+        assert flag is True
+
+    def test_below_range_clamps_and_flags(self, incident_table):
+        x_min = float(incident_table.x[0])
+        val, flag = incident_table.lookup_flagged(x_min / 10.0)
+        assert val == pytest.approx(float(incident_table.y[0]))
+        assert flag is True
+
+    def test_batch_flagged_matches_scalar(self, incident_table):
+        xs = np.array([
+            float(incident_table.x[0]) / 2.0,
+            float(incident_table.x[7]),
+            float(incident_table.x[-1]) * 3.0,
+        ])
+        vals, flags = incident_table.lookup_batch_flagged(xs)
+        for i, x in enumerate(xs):
+            v, f = incident_table.lookup_flagged(float(x))
+            assert vals[i] == pytest.approx(v)
+            assert bool(flags[i]) == f
+        assert list(flags) == [True, False, True]

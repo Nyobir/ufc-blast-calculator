@@ -296,3 +296,23 @@ class TestExtrapolationFlags:
 
         assert batch[0].extrapolated == single_near.extrapolated
         assert batch[1].extrapolated == single_far.extrapolated
+
+
+class TestScaledDistanceExtrapolationFlags:
+    """1D (Z-dependent) chart bounds must clamp and flag, not raise."""
+
+    def test_far_out_of_range_point_flags_z_tables(self):
+        """A slant distance far beyond the chart range clamps and flags
+        the Z-dependent tables instead of raising."""
+        result = compute_point(R_alpha=5000.0, alpha_deg=0.0, W=1.0)
+        assert "ps0" in result.extrapolated
+        assert "tA" in result.extrapolated
+        assert "t0" in result.extrapolated
+
+    def test_batch_matches_single_for_z_flags(self):
+        R_alphas = np.array([30.0, 5000.0])
+        alphas = np.array([0.0, 0.0])
+        batch = compute_points_batch(R_alphas, alphas, W=1.0)
+        single_far = compute_point(5000.0, 0.0, W=1.0)
+        assert batch[0].extrapolated - {"calpha", "iralpha"} == set()
+        assert batch[1].extrapolated == single_far.extrapolated

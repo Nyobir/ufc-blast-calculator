@@ -121,3 +121,24 @@ class TestApplyMachStem:
                     f"Mach-corrected centre value changed with facade "
                     f"height: {vals} vs {centre_values[0]}"
                 )
+
+
+class TestTriplePointClampFlag:
+    """Columns whose triple-point lookup falls outside the digitized
+    Figure 2-13 range must be marked with a 'triple_point' flag."""
+
+    def test_outer_columns_flagged_inner_columns_not(self):
+        from ufc_blast.core.blast_params import compute_facade
+
+        facade = compute_facade(
+            R=30.0, W=200.0, Hc=5.0, width=30.0, height=24.0, step=0.25,
+        )
+        # For W=200, R=30 the digitized family range ends at scaled ground
+        # distance 5.556 m/kg^(1/3), i.e. |dx| >= ~12.6 m clamps.
+        flagged_cols = {
+            dx for (dx, dy), res in facade.result_map.items()
+            if "triple_point" in res.extrapolated
+        }
+        assert (15.0 in flagged_cols) and (-15.0 in flagged_cols)
+        assert 0.0 not in flagged_cols
+        assert 10.0 not in flagged_cols
