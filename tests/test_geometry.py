@@ -104,16 +104,26 @@ class TestGenerateGridBuildingMode:
         )
         assert len(points) == 99
 
-    def test_building_grid_centre_point(self):
-        """Centre point of the building grid must have dx=0, dy=0."""
+    def test_building_grid_normal_point(self):
+        """The normal-incidence point (dx=0, dy=0) lies on the facade when
+        the facade reaches the burst height (Hc <= height)."""
         points = generate_grid(
-            R=30.0, W=VALID_W, Hc=VALID_Hc,
+            R=30.0, W=VALID_W, Hc=5.0,
             width=10.0, height=8.0, step=1.0,
         )
         centre_points = [p for p in points if p.dx == 0.0 and p.dy == 0.0]
-        assert len(centre_points) == 1, "Exactly one centre point expected"
+        assert len(centre_points) == 1, "Exactly one normal point expected"
         cp = centre_points[0]
         assert math.isclose(cp.alpha_deg, 0.0, abs_tol=ABS_TOL)
+
+    def test_building_grid_short_facade_below_burst_height(self):
+        """A facade shorter than Hc lies entirely below the burst height."""
+        points = generate_grid(
+            R=30.0, W=VALID_W, Hc=VALID_Hc,  # Hc = 10 m
+            width=10.0, height=8.0, step=1.0,
+        )
+        assert all(p.dy < 0 for p in points)
+        assert not any(p.dx == 0.0 and p.dy == 0.0 for p in points)
 
     def test_building_grid_geometry_correctness(self):
         """Every point in the building grid satisfies the geometry formulas."""
@@ -199,3 +209,39 @@ class TestGenerateGridOpenField:
         points = generate_grid(R=50.0, W=VALID_W, Hc=VALID_Hc)
         perp = [p for p in points if p.dx == 0.0 and p.dy == 0.0]
         assert len(perp) == 1
+
+
+class TestGroundPlane:
+    """The facade grid must never extend below the ground plane (dy = -Hc)."""
+
+    def test_building_grid_base_rests_on_ground(self):
+        """Building mode: lowest row is at the ground plane, top at height-Hc."""
+        points = generate_grid(
+            R=30.0, W=200.0, Hc=5.0, width=10.0, height=8.0, step=1.0,
+        )
+        dys = sorted({p.dy for p in points})
+        assert math.isclose(dys[0], -5.0, abs_tol=1e-12)
+        assert math.isclose(dys[-1], 3.0, abs_tol=1e-12)
+        assert all(p.dy >= -5.0 - 1e-12 for p in points)
+
+    def test_building_grid_point_count_preserved(self):
+        """Ground-based grid keeps (width/step+1) x (height/step+1) points."""
+        points = generate_grid(
+            R=30.0, W=200.0, Hc=5.0, width=30.0, height=24.0, step=0.25,
+        )
+        assert len(points) == 121 * 97
+
+    def test_building_grid_contains_normal_point_when_facade_tall_enough(self):
+        """dy=0 (burst height) lies on the facade iff Hc <= height."""
+        points = generate_grid(
+            R=30.0, W=200.0, Hc=5.0, width=10.0, height=8.0, step=1.0,
+        )
+        assert any(p.dx == 0.0 and p.dy == 0.0 for p in points)
+
+    def test_open_field_clipped_at_ground(self):
+        """Open-field expansion must not descend below the ground plane."""
+        points = generate_grid(R=20.0, W=200.0, Hc=5.0, step=5.0)
+        assert all(p.dy >= -5.0 - 1e-12 for p in points)
+        # ...but still expands upward and sideways as before
+        assert any(p.dy > 0 for p in points)
+        assert any(p.dx > 0 for p in points)

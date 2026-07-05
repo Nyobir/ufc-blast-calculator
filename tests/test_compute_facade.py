@@ -130,9 +130,9 @@ class TestComputeFacadeSurfaceBurst:
         facade_air = compute_facade(R=30.0, W=200.0, Hc=5.0, width=4.0, height=4.0, step=2.0)
         facade_surface = compute_facade(R=30.0, W=1000.0, Hc=3.0, width=4.0, height=4.0, step=2.0)
 
-        # Centre point (0, 0) — both grids have it
-        air_pr = facade_air.result_map[(0.0, 0.0)].Ps0
-        surf_pr = facade_surface.result_map[(0.0, 0.0)].Ps0
+        # Compare at the foot of each facade (dx=0, ground row dy=-Hc)
+        air_pr = facade_air.result_map[(0.0, -5.0)].Ps0
+        surf_pr = facade_surface.result_map[(0.0, -3.0)].Ps0
         assert air_pr != surf_pr, "Air and surface should use different tables"
 
     def test_deterministic(self):

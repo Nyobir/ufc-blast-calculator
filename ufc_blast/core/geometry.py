@@ -8,8 +8,9 @@ Computes standoff geometry for each grid point relative to the charge:
 Supports both air burst and surface burst scenarios.  Use
 ``determine_burst_type(Hc, W)`` to classify a scenario before
 calling ``generate_grid()``.  The scaled height-of-burst threshold of
-0.397 (Hc / W^(1/3)) separates air bursts from surface bursts per
-UFC 3-340-02 Figure 2-15.
+0.397 m/kg^(1/3) (= 1.0 ft/lb^(1/3), the lowest scaled-charge-height
+family of UFC 3-340-02 Figure 2-13) separates air bursts from surface
+bursts as a chart-selection rule.
 """
 
 from __future__ import annotations
@@ -112,15 +113,19 @@ def generate_grid(
     Two modes are supported:
 
     **Building mode** (``width`` and ``height`` provided):
-        A rectangular grid centered on the perpendicular point, spanning
-        ``[-width/2, +width/2]`` horizontally and ``[-height/2, +height/2]``
-        vertically, with the given step size.  The number of points along
-        each axis is ``floor(dimension / step) + 1``.
+        A rectangular grid whose base rests on the ground plane: it spans
+        ``[-width/2, +width/2]`` horizontally (centered on the perpendicular
+        point) and ``[-Hc, height - Hc]`` vertically, so ``dy = -Hc`` is the
+        ground line and the facade rises ``height`` metres above it.  The
+        number of points along each axis is ``round(dimension / step) + 1``.
+        The burst-height row ``dy = 0`` lies on the facade whenever
+        ``Hc <= height`` and ``Hc`` is a multiple of ``step``.
 
     **Open field mode** (``width`` and ``height`` are ``None``):
-        The grid expands outward from the perpendicular point in all four
-        directions until the angle of incidence exceeds 85°.  Beyond 85°
-        the UFC reflected-pressure charts are unreliable (grazing incidence).
+        The grid expands outward from the perpendicular point until the
+        angle of incidence exceeds 85°, but never below the ground plane
+        ``dy = -Hc``.  Beyond 85° the UFC reflected-pressure charts are
+        unreliable (grazing incidence).
 
     Parameters
     ----------
@@ -144,8 +149,10 @@ def generate_grid(
 
     Notes
     -----
-    The scaled height-of-burst limit of 0.397 ft/lb^(1/3) is given in
-    UFC 3-340-02 Figure 2-15 as the minimum value for air-burst conditions.
+    The scaled height-of-burst limit of 0.397 m/kg^(1/3) equals
+    1.0 ft/lb^(1/3), the lowest scaled-charge-height family of the
+    UFC 3-340-02 Figure 2-13 triple-point chart; below it the air-burst
+    tables have no supporting data and the surface-burst charts are used.
     Use ``determine_burst_type(Hc, W)`` to classify the scenario before
     calling this function.  Both air and surface burst parameters are
     accepted; burst-type-specific chart selection is the caller's
@@ -154,16 +161,14 @@ def generate_grid(
     points: list[GridPoint] = []
 
     if width is not None and height is not None:
-        # Building mode: rectangular grid centered on perpendicular point
+        # Building mode: facade base on the ground plane (dy = -Hc),
+        # horizontally centered on the perpendicular point.
         half_w = width / 2.0
-        half_h = height / 2.0
-
-        # Number of steps along each half-axis (inclusive of centre)
         n_x = round(half_w / step)
-        n_y = round(half_h / step)
+        n_y = round(height / step)
 
-        for j in range(-n_y, n_y + 1):
-            dy = j * step
+        for j in range(0, n_y + 1):
+            dy = -Hc + j * step
             for i in range(-n_x, n_x + 1):
                 dx = i * step
                 points.append(compute_point_geometry(dx, dy, R))
@@ -183,20 +188,24 @@ def generate_grid(
                 gp2 = compute_point_geometry(dx, dy, R)
                 if j > 0 and gp2.alpha_deg > ALPHA_LIMIT:
                     break
-                # Four-quadrant symmetry (avoid duplicating axes)
+                # Four-quadrant symmetry (avoid duplicating axes); the
+                # downward branch is clipped at the ground plane dy = -Hc.
+                below_ground = -dy < -Hc
                 if dx == 0.0 and dy == 0.0:
                     points.append(compute_point_geometry(0.0, 0.0, R))
                 elif dx == 0.0:
                     points.append(compute_point_geometry(0.0, dy, R))
-                    points.append(compute_point_geometry(0.0, -dy, R))
+                    if not below_ground:
+                        points.append(compute_point_geometry(0.0, -dy, R))
                 elif dy == 0.0:
                     points.append(compute_point_geometry(dx, 0.0, R))
                     points.append(compute_point_geometry(-dx, 0.0, R))
                 else:
                     points.append(compute_point_geometry(dx, dy, R))
                     points.append(compute_point_geometry(-dx, dy, R))
-                    points.append(compute_point_geometry(dx, -dy, R))
-                    points.append(compute_point_geometry(-dx, -dy, R))
+                    if not below_ground:
+                        points.append(compute_point_geometry(dx, -dy, R))
+                        points.append(compute_point_geometry(-dx, -dy, R))
                 j += 1
             i += 1
 
