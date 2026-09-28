@@ -222,5 +222,5 @@ Contact: Vladyslav Kochkarov, v.d.kochkarov@nuwm.edu.ua
 
 ## License
 
-Code is released under the [MIT License](LICENSE). See the license file for the
+Code is released under the [MIT License](LICENSE). See [`NOTICE`](NOTICE) for the
 note on the UFC-derived data tables and the engineering disclaimer.

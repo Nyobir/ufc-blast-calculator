@@ -20,19 +20,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
--------------------------------------------------------------------------------
-Notice on the tabulated data (data/ directory)
-
-The CSV tables in data/ contain numerical values digitized from the design
-charts of UFC 3-340-02, "Structures to Resist the Effects of Accidental
-Explosions" (U.S. Department of Defense, 2008, Change 2 2014). UFC 3-340-02 is
-approved for public release with unlimited distribution. The repository stores
-only extracted numerical values, not the original chart artwork. The UFC
-document itself is not covered by this license; the digitization,
-SI normalization and table structure are provided under the terms above.
-
-Engineering disclaimer: the Software reproduces an empirical design method and
-is intended for research, teaching and verification of numerical models. It is
-not a substitute for a qualified engineer's judgement, for the full UFC
-3-340-02 procedure, or for site-specific threat and structural assessment.
