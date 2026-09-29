@@ -13,7 +13,7 @@ authors:
     affiliation: "National University of Water and Environmental Engineering"
 repository-code: "https://github.com/Nyobir/ufc-blast-calculator"
 license: MIT
-version: "1.2.1"
+version: "1.2.2"
 keywords:
   - blast loading
   - UFC 3-340-02
