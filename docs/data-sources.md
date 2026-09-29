@@ -2,7 +2,7 @@
 
 ## Source Excel Workbook
 
-**Path**: `/Users/vladyslav/Documents/Phd/Cloud/Корисні штуки/Таблиця UFC_Кінцевий варіант.xlsm`
+**File**: `Таблиця UFC_Кінцевий варіант.xlsm` (authors' chart-reading workbook, kept outside the repository; its extracted values are in `data/free_air/figure_2_193_calpha.csv` and `figure_2_194_iralpha.csv`)
 - 13 sheets, 1160+ rows
 - Main sheet: **FreeAirBlast** (434 rows)
 
@@ -22,7 +22,7 @@ Cα(0):      2.0   2.07  2.09  2.12  2.20  2.51  3.00  3.35  4.00  4.45  5.01  5
 ## WebPlotDigitizer Exports
 
 **Tool**: automeris.io/wpd/
-**Raw location**: `/Users/vladyslav/Documents/Phd/Cloud/Корисні штуки/DigitalizedUFC/2-7/`
+**Raw location**: WebPlotDigitizer project exports kept outside the repository (`DigitalizedUFC/2-7/`); processed values are in `data/free_air/`
 **Format**: Semicolon separator, comma decimal, no headers, imperial units
 
 6 files exported from Figure 2-7:

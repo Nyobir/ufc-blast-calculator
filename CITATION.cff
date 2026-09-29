@@ -11,9 +11,6 @@ authors:
     given-names: Vladyslav D.
     email: v.d.kochkarov@nuwm.edu.ua
     affiliation: "National University of Water and Environmental Engineering"
-  - family-names: Martyniuk
-    given-names: Petro M.
-    affiliation: "National University of Water and Environmental Engineering"
 repository-code: "https://github.com/Nyobir/ufc-blast-calculator"
 license: MIT
 version: "1.2.0"
