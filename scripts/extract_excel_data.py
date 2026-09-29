@@ -34,10 +34,9 @@ import openpyxl
 # Configuration
 # ---------------------------------------------------------------------------
 
-EXCEL_PATH = Path(
-    "/Users/vladyslav/Documents/Phd/Cloud/Корисні штуки/"
-    "Таблиця UFC_Кінцевий варіант.xlsm"
-)
+# The chart-reading workbook is not part of the repository; pass its path
+# on the command line (see main()).
+EXCEL_PATH = Path("Таблиця UFC_Кінцевий варіант.xlsm")
 SHEET_NAME = "FreeAirBlast"
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "free_air"
 
@@ -195,7 +194,20 @@ def write_csv(path: Path, header: list[str], rows: list[tuple]):
 # Main
 # ---------------------------------------------------------------------------
 
-def main():
+def main(argv: list[str] | None = None):
+    import argparse
+
+    global EXCEL_PATH, OUTPUT_DIR
+    parser = argparse.ArgumentParser(
+        description="Extract UFC 3-340-02 tables (Figures 2-193, 2-194) from the chart-reading workbook."
+    )
+    parser.add_argument("workbook", type=Path, help="Path to the .xlsm chart-reading workbook.")
+    parser.add_argument(
+        "--out-dir", type=Path, default=OUTPUT_DIR,
+        help="Output directory for the SI tables (default: data/free_air).",
+    )
+    args = parser.parse_args(argv)
+    EXCEL_PATH, OUTPUT_DIR = args.workbook, args.out_dir
     if not EXCEL_PATH.exists():
         print(f"ERROR: Excel file not found: {EXCEL_PATH}", file=sys.stderr)
         sys.exit(1)

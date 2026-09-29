@@ -57,8 +57,10 @@ IMPULSE_FACTOR = KPA_PER_PSI / CBRT_LB_PER_KG  # ≈ 8.974
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-SRC_DIR = Path("/Users/vladyslav/Documents/Phd/Cloud/Корисні штуки/DigitalizedUFC/2-7")
-OUT_DIR = Path("/Users/vladyslav/Projects/ufc_calculator/data/free_air")
+# The raw WebPlotDigitizer exports for Figure 2-7 are not part of the
+# repository; pass their directory on the command line (see main()).
+SRC_DIR = Path(".")
+OUT_DIR = Path(__file__).resolve().parent.parent / "data" / "free_air"
 
 
 def read_wpd_csv(path: Path) -> list[tuple[float, float]]:
@@ -178,5 +180,25 @@ def process_all() -> None:
     print("Done. All output files written to:", OUT_DIR)
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> None:
+    import argparse
+
+    global SRC_DIR, OUT_DIR
+    parser = argparse.ArgumentParser(
+        description="Convert WebPlotDigitizer exports of UFC 3-340-02 Figure 2-7 to SI CSV tables."
+    )
+    parser.add_argument(
+        "src_dir", type=Path,
+        help="Directory with the raw WPD exports (t0.csv, tA.csv, Ps0.csv, Pr.csv, ir.csv, is.csv).",
+    )
+    parser.add_argument(
+        "--out-dir", type=Path, default=OUT_DIR,
+        help="Output directory for the SI tables (default: data/free_air).",
+    )
+    args = parser.parse_args(argv)
+    SRC_DIR, OUT_DIR = args.src_dir, args.out_dir
     process_all()
+
+
+if __name__ == "__main__":
+    main()
