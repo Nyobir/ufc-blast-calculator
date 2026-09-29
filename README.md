@@ -197,18 +197,6 @@ tests/                    pytest suite
 docs/                     algorithm, data provenance, design decisions
 ```
 
-## Citation
-
-If you use this software, please cite it. The citation metadata is in
-[`CITATION.cff`](CITATION.cff); GitHub shows it under **"Cite this repository"**.
-The software paper is currently under review; until it is published please
-also cite:
-
-> P.M. Martyniuk, V.D. Kochkarov. Two-dimensional modeling of explosion
-> impulses on a structure using the discrete element method. *Mathematical
-> Modeling and Computing* 12(4) (2025) 1157–1168.
-> https://doi.org/10.23939/mmc2025.04.1157
-
 ## Contributing and support
 
 Bug reports and questions are welcome in
