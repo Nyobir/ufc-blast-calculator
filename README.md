@@ -131,6 +131,7 @@ charts:
 | Chart | Content | Files |
 |---|---|---|
 | Fig. 2-7 | free-air burst: P<sub>s0</sub>, P<sub>r</sub>, i<sub>s</sub>, i<sub>r</sub>, t<sub>A</sub>, t<sub>0</sub> vs. scaled distance | `data/free_air/figure_2_7_*.csv` |
+| Figs. 2-9, 2-10 | Mach-front pressure and impulse at the ground (official DPlot data) | `data/free_air/figure_2_9_pra.csv`, `data/free_air/figure_2_10_ira.csv` |
 | Fig. 2-13 | triple-point height (Mach stem) | `data/free_air/figure_2_13_triple_point.csv`, `data/triple_point/` |
 | Fig. 2-15 | surface burst: same parameters as Fig. 2-7 | `data/surface/figure_2_15_*.csv` |
 | Fig. 2-193 | reflection coefficient C<sub>α</sub>(α, P<sub>s0</sub>) | `data/free_air/figure_2_193_calpha.csv` |

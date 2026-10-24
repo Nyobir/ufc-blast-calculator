@@ -8,7 +8,7 @@ Read this before changing code. User-facing documentation is in `README.md`.
 
 ```bash
 uv sync --extra dev                    # install with test dependencies
-uv run pytest tests/ -v                # 113 tests, a few seconds
+uv run pytest tests/ -v                # 119 tests, a few seconds
 uv run pytest tests/test_X.py -v       # single module
 uv run python -m ufc_blast             # launch GUI (default entry point)
 uv run ufc-blast point --W 200 --R 30 --Hc 5 --alpha 0
@@ -42,7 +42,8 @@ Input (W, R, Hc, width, height, step)
   → determine_burst_type()   # Hc/W^(1/3) > 0.397 → air; else → surface
   → generate_grid()          # GridPoint list with R_alpha, alpha_deg
   → compute_points_batch()   # vectorized: Ps0, C_alpha, ir, tA, t0, b for all points at once
-  → apply_mach_stem()        # air bursts only: uniform pressure below the triple point
+  → apply_mach_stem()        # air bursts only: below the triple point, UFC §2-13.2 Mach-front values
+                             # computed at the ground (compute_mach_front, Figs. 2-9/2-10 → 2-7 → 2-193/2-194)
   → FacadeResult             # grid_points, result_map, mach_curve
 ```
 

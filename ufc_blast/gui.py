@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 )
 
 from ufc_blast.core.blast_params import (
+    INFO_FLAGS,
     BlastPointResult,
     FacadeResult,
     compute_facade,
@@ -135,7 +136,7 @@ def _build_extrap_mask(
     nx, ny = len(dx_vals), len(dy_vals)
 
     mask = np.array(
-        [bool(result_map[(dx, dy)].extrapolated) for dy in dy_vals for dx in dx_vals],
+        [bool(result_map[(dx, dy)].extrapolated - INFO_FLAGS) for dy in dy_vals for dx in dx_vals],
         dtype=bool,
     ).reshape(ny, nx)
 

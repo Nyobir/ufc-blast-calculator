@@ -1,6 +1,6 @@
 [project]
 name = "ufc-blast"
-version = "0.1.0"
+version = "1.3.0"
 description = "UFC 3-340-02 blast wave calculator for building facade pressure analysis"
 requires-python = ">=3.10"
 dependencies = [

@@ -33,7 +33,17 @@ Single-point b-solver uses `scipy.optimize.brentq` (robust, bracketed). Batch co
 
 ## Mach Stem as Post-Processing
 
-Rather than special-casing the Mach zone in the core loop, `apply_mach_stem()` runs after `compute_points_batch()` and overwrites results below the triple point height with uniform values from above. This keeps the core calculation simple and testable.
+`apply_mach_stem()` runs after `compute_points_batch()` and overwrites results below the triple-point height.
+
+Since v1.3.0 the Mach-region values follow UFC 3-340-02 §2-13.2 literally ("the blast parameters in the Mach front are calculated at the ground surface"), with Problems 2A-2 and 2A-10 as the step list (`compute_mach_front()`):
+
+1. Ground point in front of the facade column: Rg = sqrt(R^2 + dx^2), angle alpha_g = atan(Rg/Hc).
+2. Pr_alpha and ir_alpha/W^(1/3) at that ground point from Figs. 2-9 and 2-10 (official UFC DPlot data, `figure_2_9_pra.csv`, `figure_2_10_ira.csv`). These become Pso and is of the Mach wave.
+3. Fig. 2-7: the distance that gives Pso gives tA; the distance that gives is gives t0.
+4. The Mach front travels horizontally, so it strikes the column at theta = atan(|dx|/R). Wall Pr = C_alpha(Pso, theta)*Pso and ir_alpha(Pso, theta) from Figs. 2-193 and 2-194.
+5. If ir > Pr*t0/2 no Friedlander curve can carry the impulse; t0 is then the UFC fictitious duration 2*ir/Pr (Eq. 2-11), flag `t0_fictitious` (informational, not hatched).
+
+Before v1.3.0 the region took the value evaluated at the triple point on the facade. That was not conservative when the whole facade lay in the Mach region (up to about 10% below regular reflection), see the review-round study.
 
 ## Mach Visualization: Unified Contourf
 

@@ -171,7 +171,8 @@ class TestExtrapolationInFacade:
         """Extrapolated set should contain valid table key strings."""
         facade = compute_facade(R=110.0, W=200.0, Hc=5.0, width=4.0, height=4.0, step=2.0)
         valid_keys = {"calpha", "iralpha", "ps0", "tA", "t0",
-                      "surface_ps0", "surface_tA", "surface_t0", "triple_point"}
+                      "surface_ps0", "surface_tA", "surface_t0", "triple_point",
+                      "mach_ground", "mach_inverse", "friedlander_b"}
         for res in facade.result_map.values():
             assert res.extrapolated <= valid_keys, (
                 f"Unexpected table keys: {res.extrapolated - valid_keys}"

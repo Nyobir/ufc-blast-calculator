@@ -109,6 +109,39 @@ def load_ufc_tables() -> None:
         "tA_scaled_ms_kg13",
     )
 
+    # Normally reflected pressure, incident and reflected impulse (Figure 2-7).
+    # Used by the UFC 3-340-02 §2-13.2 Mach-front procedure.
+    _tables["pr"] = Table1D.from_csv(
+        DATA_DIR / "figure_2_7_wpd_pr.csv",
+        "z_m_kg13",
+        "pr_kpa",
+    )
+    _tables["is"] = Table1D.from_csv(
+        DATA_DIR / "figure_2_7_wpd_is.csv",
+        "z_m_kg13",
+        "is_scaled_kpa_ms_kg13",
+    )
+    _tables["ir"] = Table1D.from_csv(
+        DATA_DIR / "figure_2_7_wpd_ir.csv",
+        "z_m_kg13",
+        "ir_scaled_kpa_ms_kg13",
+    )
+    # Reflected pressure and scaled reflected impulse on the ground versus
+    # angle of incidence, for families of scaled charge height (Figs. 2-9,
+    # 2-10). Taken from the official UFC 3-340-02 DPlot files, converted to SI.
+    _tables["pra_ground"] = Table2D.from_csv(
+        DATA_DIR / "figure_2_9_pra.csv",
+        family_col="hc_scaled_m_kg13",
+        x_col="angle_deg",
+        value_col="pra_kpa",
+    )
+    _tables["ira_ground"] = Table2D.from_csv(
+        DATA_DIR / "figure_2_10_ira.csv",
+        family_col="hc_scaled_m_kg13",
+        x_col="angle_deg",
+        value_col="ira_scaled_kpa_ms_kg13",
+    )
+
     # Surface burst tables (Figure 2-15)
     _tables["surface_ps0"] = Table1D.from_csv(
         SURFACE_DATA_DIR / "figure_2_15_wpd_ps0.csv",
@@ -196,6 +229,8 @@ def compute_point(R_alpha: float, alpha_deg: float, W: float, burst_type: str = 
 
     # Friedlander decay parameter
     b = solve_friedlander_b(Pr_alpha, t0, ir_alpha)
+    if bool(_b_clipped(np.array([Pr_alpha]), np.array([t0]), np.array([ir_alpha]))[0]):
+        extrapolated.add("friedlander_b")
 
     return BlastPointResult(
         Ps0=Ps0,
@@ -265,6 +300,7 @@ def compute_points_batch(
 
     # Friedlander b — vectorized Newton's method
     b_vals = _solve_friedlander_b_batch(Pr_alpha, t0_vals, ir_alpha)
+    b_clipped = _b_clipped(Pr_alpha, t0_vals, ir_alpha)
 
     return [
         BlastPointResult(
@@ -281,10 +317,36 @@ def compute_points_batch(
                 | ({"iralpha"} if oor_iralpha[i] else set())
                 | ({"tA"} if oor_tA[i] else set())
                 | ({"t0"} if oor_t0[i] else set())
+                | ({"friedlander_b"} if b_clipped[i] else set())
             ),
         )
         for i in range(n)
     ]
+
+
+B_LO, B_HI = 0.01, 50.0
+# Flags that describe how a value was built rather than a chart-boundary
+# clamp. They are reported but not hatched as extrapolation.
+INFO_FLAGS = frozenset({"t0_fictitious"})
+# Range of Hc/W^(1/3) where the air/surface switch is flagged as sensitive.
+NEAR_THRESHOLD = (0.3, 0.5)
+
+
+def _b_clipped(Pr: np.ndarray, t0: np.ndarray, ir: np.ndarray) -> np.ndarray:
+    """True where no Friedlander b in [B_LO, B_HI] reproduces the impulse.
+
+    The impulse of the Friedlander curve decreases monotonically with b, so a
+    root exists only if impulse(B_HI) < ir < impulse(B_LO). Outside that range
+    both solvers return a bracket end; such points get the ``friedlander_b``
+    flag so the clipping is never silent.
+    """
+    Pr = np.asarray(Pr, dtype=float); t0 = np.asarray(t0, dtype=float)
+    ir = np.asarray(ir, dtype=float)
+
+    def imp(b: float) -> np.ndarray:
+        return Pr * t0 / b ** 2 * (b - 1.0 + math.exp(-b))
+
+    return (ir >= imp(B_LO)) | (ir <= imp(B_HI))
 
 
 def _solve_friedlander_b_batch(
@@ -465,6 +527,14 @@ def compute_facade(
         load_ufc_tables()
 
     burst_type, scaled_hob = determine_burst_type(Hc, W)
+    if NEAR_THRESHOLD[0] <= scaled_hob <= NEAR_THRESHOLD[1]:
+        warnings.warn(
+            f"Hc/W^(1/3) = {scaled_hob:.3f} is close to the air/surface "
+            f"chart-selection rule (0.397). The two UFC chart families can "
+            f"differ by tens of percent here; compare both branches.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     # Validate that scaled Hc falls within the triple point table range
     # for air bursts (Mach stem correction requires this data)
@@ -596,17 +666,12 @@ def apply_mach_stem(
             # Mach line is below all grid points — no correction needed
             continue
 
-        # Evaluate the merged-front parameters exactly at the triple-point
-        # height (dx, mach_dy) through the pointwise pipeline, so the Mach
-        # correction is independent of the facade extent and grid step.
-        R_alpha_mach = math.sqrt(R ** 2 + dx ** 2 + mach_dy ** 2)
-        alpha_mach = math.degrees(math.acos(min(1.0, R / R_alpha_mach)))
-        try:
-            mach_result = compute_point(
-                R_alpha_mach, alpha_mach, W, burst_type="air",
-            )
-        except ValueError:
-            # Triple-point height lies outside the chart-supported range —
+        # UFC 3-340-02 §2-13.2: the Mach-front parameters are calculated at
+        # the ground surface immediately in front of the structure, and the
+        # front is a plane wave of uniform pressure over its full height.
+        mach_result = compute_mach_front(R=R, dx=dx, W=W, Hc=Hc)
+        if mach_result is None:
+            # Ground-point lookup outside the chart-supported range —
             # leave the regular-reflection values for this column.
             continue
 
@@ -619,3 +684,98 @@ def apply_mach_stem(
                 result_map[(dx, dy)] = mach_result
 
     return result_map, mach_curve
+
+
+def _inverse_lookup(table: "Table1D", value: float) -> tuple[float, bool]:
+    """Scaled distance Z at which a monotonically decreasing chart curve
+    takes *value* (log-log interpolation). Clamps and flags out-of-range values.
+    """
+    x = np.log(table.x); y = np.log(table.y)
+    order = np.argsort(y)
+    ys, xs = y[order], x[order]
+    v = math.log(value)
+    clamped = bool(v < ys[0] or v > ys[-1])
+    return float(math.exp(np.interp(v, ys, xs))), clamped
+
+
+def compute_mach_front(R: float, dx: float, W: float, Hc: float) -> BlastPointResult | None:
+    """Mach-front load on a facade column, following UFC 3-340-02 §2-13.2.
+
+    1. Take the ground point immediately in front of the facade column
+       (horizontal distance Rg = sqrt(R^2 + dx^2) from ground zero) and the
+       angle of incidence of the initial wave on the ground, alpha_g = atan(Rg/Hc).
+    2. Read the reflected pressure Pr_alpha and scaled reflected impulse
+       ir_alpha at that ground point from Figs. 2-9 and 2-10, using the scaled
+       charge height Hc/W^(1/3) and alpha_g.
+    3. These ground values become the incident pressure Pso and incident
+       impulse is of the Mach wave (Problem 2A-2, Steps 5-8). The scaled
+       distance that gives Pso on Fig. 2-7 gives the arrival time tA; the one
+       that gives is gives the positive-phase duration t0.
+    4. The Mach front travels horizontally, so it strikes the facade column at
+       theta = atan(|dx|/R). The reflected pressure and impulse on the wall
+       follow Problem 2A-10, Step 4: Pr = C_alpha(Pso, theta)*Pso and
+       ir_alpha(Pso, theta) from Figs. 2-193 and 2-194.
+
+    Returns None when the ground-point lookup is outside the charts.
+    """
+    if not _tables:
+        load_ufc_tables()
+    W_cbrt = W ** (1.0 / 3.0)
+    flags: set[str] = set()
+
+    Rg = math.hypot(R, dx)
+    alpha_g = math.degrees(math.atan2(Rg, Hc))
+    hc_s = Hc / W_cbrt
+    try:
+        Pso_M, f1 = _tables["pra_ground"].lookup_flagged(x=alpha_g, family=hc_s)
+        is_M, f2 = _tables["ira_ground"].lookup_flagged(x=alpha_g, family=hc_s)
+    except ValueError:
+        return None
+    if f1 or f2:
+        flags.add("mach_ground")
+
+    # Problem 2A-2, Steps 5-8: scaled distances on Fig. 2-7 that give the
+    # Mach-wave Pso (-> tA) and is (-> t0).
+    Zp, c1 = _inverse_lookup(_tables["ps0"], Pso_M)
+    Zi, c2 = _inverse_lookup(_tables["is"], is_M)
+    tA_s, g1 = _tables["tA"].lookup_flagged(Zp)
+    t0_s, g2 = _tables["t0"].lookup_flagged(Zi)
+    if c1 or c2 or g1 or g2:
+        flags.add("mach_inverse")
+
+    # Problem 2A-10, Step 4: front-wall reflected pressure and impulse from
+    # Figs. 2-193 and 2-194 for the Mach-wave Pso and the angle at which the
+    # horizontally travelling Mach front strikes the wall.
+    theta = math.degrees(math.atan2(abs(dx), R))
+    Ca, h1 = _tables["calpha"].lookup_flagged(x=theta, family=Pso_M)
+    ira_s, h2 = _tables["iralpha"].lookup_flagged(x=theta, family=Pso_M)
+    if h1:
+        flags.add("calpha")
+    if h2:
+        flags.add("iralpha")
+
+    Pr = Ca * Pso_M
+    ir = ira_s * W_cbrt / 1000.0
+    tA = tA_s * W_cbrt / 1000.0
+    t0 = t0_s * W_cbrt / 1000.0
+    if not all(np.isfinite([Pr, ir, tA, t0])) or Pr <= 0 or ir <= 0:
+        return None
+
+    # The UFC-literal duration (from the is distance) can be too short for any
+    # Friedlander curve to carry the reflected impulse (ir > Pr*t0/2). UFC
+    # itself loads the front wall with a triangle of fictitious duration
+    # t_rf = 2*ir/Pr (Eq. 2-11, Problem 2A-10 Step 5f). In that case we use
+    # t_rf, which keeps the UFC peak and impulse; b then sits at its lower
+    # bound, i.e. the curve is the UFC triangle. Flagged "t0_fictitious".
+    if ir >= Pr * t0 / 2.0:
+        t0 = 2.0 * ir / Pr * 1.005
+        flags.add("t0_fictitious")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        b = solve_friedlander_b(Pr, t0, ir)
+    if bool(_b_clipped(np.array([Pr]), np.array([t0]), np.array([ir]))[0]):
+        flags.add("friedlander_b")
+    return BlastPointResult(
+        Ps0=Pso_M, C_alpha=Ca, Pr_alpha=Pr, ir_alpha=ir,
+        tA=tA, t0=t0, b=b, extrapolated=flags,
+    )

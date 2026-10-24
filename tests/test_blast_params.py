@@ -314,5 +314,5 @@ class TestScaledDistanceExtrapolationFlags:
         alphas = np.array([0.0, 0.0])
         batch = compute_points_batch(R_alphas, alphas, W=1.0)
         single_far = compute_point(5000.0, 0.0, W=1.0)
-        assert batch[0].extrapolated - {"calpha", "iralpha"} == set()
+        assert batch[0].extrapolated - {"calpha", "iralpha", "friedlander_b"} == set()
         assert batch[1].extrapolated == single_far.extrapolated
