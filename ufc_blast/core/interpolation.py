@@ -361,6 +361,15 @@ class Table2D:
         if out_of_range:
             family = float(np.clip(family, fam_min, fam_max))
 
+        # A query on a digitized family curve uses that curve only. Without
+        # this, a family equal to a level (up to rounding) was bracketed with
+        # its neighbour and x was clamped to the neighbour's shorter range.
+        hit = np.isclose(self.family_levels, family, rtol=1e-5, atol=0.0)
+        if hit.any():
+            tbl = self.x_tables[float(self.family_levels[int(np.argmax(hit))])]
+            x, x_clamped = self._clamp_x(x, tbl)
+            return tbl.lookup(x, method="linear"), out_of_range or x_clamped
+
         # Find bracketing family levels — same logic as lookup()
         idx = np.searchsorted(self.family_levels, family)
 
@@ -465,6 +474,19 @@ class Table2D:
             else:
                 t = (fam_sub - fam_lo) / (fam_hi - fam_lo)
                 result[mask] = (1 - t) * val_lo + t * val_hi
+
+        # Queries on a digitized family curve use that curve only (see lookup_flagged).
+        for lev in self.family_levels:
+            on = np.isclose(families_clamped, lev, rtol=1e-5, atol=0.0)
+            if not np.any(on):
+                continue
+            tbl = self.x_tables[float(lev)]
+            x_raw = xs[on]
+            out_of_range[on] = (
+                (families[on] < fam_min) | (families[on] > fam_max)
+                | (x_raw < tbl.x[0]) | (x_raw > tbl.x[-1])
+            )
+            result[on] = tbl.lookup_batch(np.clip(x_raw, tbl.x[0], tbl.x[-1]), method="linear")
 
         return result, out_of_range
 

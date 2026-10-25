@@ -350,3 +350,16 @@ class TestTable1DFlagged:
             assert vals[i] == pytest.approx(v)
             assert bool(flags[i]) == f
         assert list(flags) == [True, False, True]
+
+
+def test_table2d_query_on_family_level_uses_that_curve_only():
+    """A family exactly on a level must not be clamped to a neighbour's x range."""
+    import numpy as np
+    from ufc_blast.core.interpolation import Table1D, Table2D
+    lo = Table1D(x=np.array([1.0, 2.0]), y=np.array([1.0, 2.0]))
+    hi = Table1D(x=np.array([1.0, 5.0]), y=np.array([10.0, 50.0]))
+    t = Table2D(family_levels=np.array([1.0, 2.0]), x_tables={1.0: lo, 2.0: hi})
+    v, flag = t.lookup_flagged(x=4.0, family=2.0 * (1 - 1e-7))
+    assert v == 40.0 and not flag
+    vb, fb = t.lookup_batch_flagged(np.array([4.0]), np.array([2.0]))
+    assert vb[0] == 40.0 and not fb[0]
