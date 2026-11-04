@@ -2,7 +2,6 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)
-![Tests](https://img.shields.io/badge/tests-113%20passing-brightgreen)
 
 An open-source Python tool that turns the chart-based blast-loading method of
 **UFC 3-340-02** into a tested, spatially resolved calculator of facade blast
@@ -46,8 +45,10 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-A pre-built Windows bundle (no Python needed) is attached to each
-[GitHub release](https://github.com/Nyobir/ufc-blast-calculator/releases).
+The previous v1.2.2 release includes a pre-built Windows bundle. Check the
+[GitHub releases](https://github.com/Nyobir/ufc-blast-calculator/releases) for
+platform-specific assets of the version you install; a revision executable is
+not available until its build workflow has completed.
 
 ## Quick start
 
@@ -125,7 +126,7 @@ conversions in [`docs/unit-conversions.md`](docs/unit-conversions.md).
 
 ## Data
 
-`data/` holds 17 SI-normalized CSV tables taken from the UFC 3-340-02 design
+`data/` holds 19 SI-normalized CSV tables taken from the UFC 3-340-02 design
 charts:
 
 | Chart | Content | Files |
@@ -138,7 +139,8 @@ charts:
 | Fig. 2-194 | reflected scaled impulse i<sub>rα</sub>(α, P<sub>s0</sub>) | `data/free_air/figure_2_194_iralpha.csv` |
 
 Curves were digitized with WebPlotDigitizer; the angle-dependent tables were
-transcribed from a chart-reading workbook. The processing scripts in
+transcribed from a chart-reading workbook, with 14 Figure 2-193 tail points
+restored from the official electronic DPlot curve file. The processing scripts in
 `scripts/` convert the imperial chart units to SI. Provenance for every table
 is in [`docs/data-sources.md`](docs/data-sources.md).
 
@@ -148,7 +150,7 @@ repository stores only the extracted numerical values, not the chart artwork.
 ## Verification
 
 ```bash
-uv run pytest tests/ -q        # 113 tests
+uv run pytest tests/ -q        # full suite (requires a supported PySide6 platform)
 ```
 
 The test suite covers interpolation, geometry, burst-type selection, the Mach
@@ -164,8 +166,10 @@ The scripts that reproduce the figures and tables of the accompanying paper:
 | `scripts/cross_chart_check.py` | consistency check between independent charts |
 | `scripts/plot_verification.py` | redraw of UFC Fig. 2-7 in imperial units for visual comparison |
 
-The version used in the paper is tagged
+The older manuscript snapshot is tagged
 [`manuscript-v1.2`](https://github.com/Nyobir/ufc-blast-calculator/tree/manuscript-v1.2).
+The revised SoftwareX analysis currently refers to local commit `9d287e0`;
+until it is released, that revision must not be confused with the older tag.
 
 ## Scope and limitations
 
@@ -192,7 +196,7 @@ ufc_blast/
                           Friedlander solvers, Mach stem
   cli.py                  command-line interface (point, compute, batch, gui)
   gui.py                  PySide6 + Matplotlib interface
-data/                     17 SI tables digitized from UFC 3-340-02
+data/                     19 normalized SI tables derived from UFC 3-340-02
 scripts/                  data processing and paper reproduction scripts
 tests/                    pytest suite
 docs/                     algorithm, data provenance, design decisions

@@ -585,10 +585,11 @@ def apply_mach_stem(
 ) -> tuple[dict[tuple[float, float], BlastPointResult], list[tuple[float, float]]]:
     """Apply Mach stem correction to grid results.
 
-    For each facade column (unique dx), compute the triple point height from
-    UFC Figure 2-13. All grid points below that height get their blast
-    parameters overwritten with the values at the triple point height
-    (uniform Mach stem pressure).
+    For each facade column (unique dx), use UFC Figure 2-13 to estimate
+    the triple-point height. Below that height apply the UFC Section 2-13.2
+    ground-evaluated pressure and impulse procedure (Figures 2-9/2-10),
+    with the resulting column-wise values constant over the Mach region.
+    Do not substitute blast values sampled at the triple-point height.
 
     Parameters
     ----------
