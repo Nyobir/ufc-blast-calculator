@@ -43,10 +43,22 @@ def test_example_2a2_ground_values():
 
 def test_mach_region_uses_ground_values_not_triple_point():
     f = compute_facade(R=30.0, W=200.0, Hc=5.0, width=20.0, height=10.0, step=1.0)
-    ref = compute_mach_front(R=30.0, dx=0.0, W=200.0, Hc=5.0)
-    low = f.result_map[(0.0, -5.0)]
-    assert low.Pr_alpha == pytest.approx(ref.Pr_alpha)
-    assert low.ir_alpha == pytest.approx(ref.ir_alpha)
+    for dx in (-5.0, 0.0, 5.0):
+        ref = compute_mach_front(R=30.0, dx=dx, W=200.0, Hc=5.0)
+        low = f.result_map[(dx, -5.0)]
+        assert ref is not None
+        for field in ("Ps0", "C_alpha", "Pr_alpha", "ir_alpha", "tA", "t0", "b"):
+            assert getattr(low, field) == pytest.approx(getattr(ref, field)), (dx, field)
+        assert low.extrapolated == ref.extrapolated
+
+
+def test_chart_selection_at_exact_threshold():
+    from ufc_blast.core.geometry import determine_burst_type
+
+    for scaled_hob, expected in ((0.397 - 1e-6, "surface"),
+                                 (0.397, "surface"),
+                                 (0.397 + 1e-6, "air")):
+        assert determine_burst_type(scaled_hob, 1.0)[0] == expected
 
 
 def test_mach_wave_stronger_than_free_air_incident():

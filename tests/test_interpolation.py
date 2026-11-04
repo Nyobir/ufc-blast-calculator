@@ -177,6 +177,15 @@ class TestTable2DLookup:
             f"Expected ~12.24, got {result}"
         )
 
+    def test_calpha_every_dplot_family_reaches_90_degrees(self, calpha):
+        """Official UFC Fig. 2-193 DPlot curves end at (90 deg, C_alpha=1)."""
+        for family in calpha.family_levels:
+            table = calpha.x_tables[float(family)]
+            assert table.x[-1] == pytest.approx(90.0, abs=1e-9), family
+            value, clamped = calpha.lookup_flagged(x=90.0, family=float(family))
+            assert not clamped, family
+            assert value == pytest.approx(1.0, abs=0.01), family
+
     def test_calpha_decreases_with_angle(self, calpha):
         """Reflection coefficient must decrease as angle of incidence increases."""
         ps0_mid = 344.74  # interior pressure level
