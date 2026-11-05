@@ -27,7 +27,12 @@ from ufc_blast.core.interpolation import Table1D, Table2D
 if getattr(sys, "frozen", False):
     _BASE = Path(sys._MEIPASS)
 else:
-    _BASE = Path(__file__).resolve().parent.parent.parent
+    _SOURCE_ROOT = Path(__file__).resolve().parent.parent.parent
+    # Editable/source checkouts retain data/ at repository root. A built wheel
+    # ships the normalized tables under ufc_blast/data instead.
+    _BASE = (_SOURCE_ROOT if (_SOURCE_ROOT / "data" / "free_air"
+                             / "figure_2_7_wpd_ps0.csv").is_file()
+             else Path(__file__).resolve().parent.parent)
 
 DATA_DIR = _BASE / "data" / "free_air"
 SURFACE_DATA_DIR = _BASE / "data" / "surface"

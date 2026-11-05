@@ -302,8 +302,8 @@ def _cmd_gui(args: argparse.Namespace) -> int:
         from ufc_blast.gui import launch_gui
     except ImportError as exc:
         print(
-            f"ERROR: GUI module not available ({exc}). "
-            "Make sure Task 9 (gui.py) is implemented.",
+            f"ERROR: GUI dependencies are unavailable ({exc}). "
+            "Install the GUI extra on a supported platform: pip install 'ufc-blast[gui]'.",
             file=sys.stderr,
         )
         return 1

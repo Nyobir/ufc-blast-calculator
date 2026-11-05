@@ -38,17 +38,21 @@ git clone https://github.com/Nyobir/ufc-blast-calculator.git
 cd ufc-blast-calculator
 
 # recommended: uv
-uv sync --extra dev
+uv sync --extra dev                # core, CLI and non-GUI tests
+uv sync --extra dev --extra gui    # additionally install the GUI where PySide6 wheels are available
 
 # or plain pip
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev]"            # add ",gui" to the extras to run the desktop GUI
 ```
 
 The previous v1.2.2 release includes a pre-built Windows bundle. Check the
 [GitHub releases](https://github.com/Nyobir/ufc-blast-calculator/releases) for
 platform-specific assets of the version you install; a revision executable is
-not available until its build workflow has completed.
+not available until its build workflow has completed. On Linux aarch64 the
+`[gui]` extra selects PySide6 6.7.x, whose wheel supports Debian 12's glibc;
+on other platforms it uses a current compatible PySide6 release. The GUI
+requires a working Qt display or `QT_QPA_PLATFORM=offscreen` for smoke tests.
 
 ## Quick start
 
@@ -64,7 +68,7 @@ ufc-blast compute --W 200 --R 30 --Hc 5 --width 20 --height 10 --step 0.25 -o fa
 # Several angles of incidence at one standoff
 ufc-blast batch --W 200 --R 30 --Hc 5 --alphas 0,15,30,45,60
 
-# Interactive GUI: pressure map + Friedlander curve for any clicked point
+# Interactive GUI (install the [gui] extra first): pressure map + Friedlander curve
 ufc-blast gui --W 200 --R 30 --Hc 5 --width 20 --height 10 --step 0.25
 ```
 
@@ -150,7 +154,8 @@ repository stores only the extracted numerical values, not the chart artwork.
 ## Verification
 
 ```bash
-uv run pytest tests/ -q        # full suite (requires a supported PySide6 platform)
+uv run --locked --extra dev pytest tests/ -q              # GUI tests skip without PySide6
+uv run --locked --extra dev --extra gui pytest tests/ -q  # full suite on a supported GUI platform
 ```
 
 The test suite covers interpolation, geometry, burst-type selection, the Mach
@@ -168,8 +173,10 @@ The scripts that reproduce the figures and tables of the accompanying paper:
 
 The older manuscript snapshot is tagged
 [`manuscript-v1.2`](https://github.com/Nyobir/ufc-blast-calculator/tree/manuscript-v1.2).
-The revised SoftwareX analysis currently refers to local commit `9d287e0`;
-until it is released, that revision must not be confused with the older tag.
+The revised SoftwareX numerical and Mac verification archive was generated at
+commit `9d287e0`. Subsequent commits changed documentation and release
+packaging/dependency handling; any new release requires its own installed-wheel
+and GUI checks. Do not attribute Mac timing to a later commit's installer.
 
 ## Scope and limitations
 

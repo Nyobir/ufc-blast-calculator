@@ -7,10 +7,14 @@ dependencies = [
     "numpy>=2.0",
     "scipy>=1.14",
     "matplotlib>=3.9",
-    "pyside6>=6.7",
 ]
 
 [project.optional-dependencies]
+gui = [
+    # The latest arm64 Qt wheels require glibc 2.39; 6.7.x supports Debian 12.
+    "pyside6>=6.7,<6.8; sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "pyside6>=6.7; sys_platform != 'linux' or platform_machine != 'aarch64'",
+]
 extract = ["openpyxl>=3.1"]
 dev = ["pytest>=8.0"]
 viz3d = ["pyvista>=0.44"]
@@ -22,3 +26,14 @@ ufc-blast = "ufc_blast.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Source checkouts keep the UFC tables in data/. Installed wheels need their
+# own package-relative copy; do not bundle the unnormalised surface/raw inputs.
+[tool.hatch.build.targets.wheel.force-include]
+"data/free_air" = "ufc_blast/data/free_air"
+"data/surface/figure_2_15_wpd_ps0.csv" = "ufc_blast/data/surface/figure_2_15_wpd_ps0.csv"
+"data/surface/figure_2_15_tA.csv" = "ufc_blast/data/surface/figure_2_15_tA.csv"
+"data/surface/figure_2_15_t0.csv" = "ufc_blast/data/surface/figure_2_15_t0.csv"
+"data/surface/figure_2_15_wpd_is.csv" = "ufc_blast/data/surface/figure_2_15_wpd_is.csv"
+"data/surface/figure_2_15_wpd_pr.csv" = "ufc_blast/data/surface/figure_2_15_wpd_pr.csv"
+"data/surface/figure_2_15_wpd_ir.csv" = "ufc_blast/data/surface/figure_2_15_wpd_ir.csv"
