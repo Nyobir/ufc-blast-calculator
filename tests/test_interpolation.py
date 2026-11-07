@@ -177,6 +177,15 @@ class TestTable2DLookup:
             f"Expected ~12.24, got {result}"
         )
 
+    def test_calpha_every_dplot_family_reaches_90_degrees(self, calpha):
+        """Official UFC Fig. 2-193 DPlot curves end at (90 deg, C_alpha=1)."""
+        for family in calpha.family_levels:
+            table = calpha.x_tables[float(family)]
+            assert table.x[-1] == pytest.approx(90.0, abs=1e-9), family
+            value, clamped = calpha.lookup_flagged(x=90.0, family=float(family))
+            assert not clamped, family
+            assert value == pytest.approx(1.0, abs=0.01), family
+
     def test_calpha_decreases_with_angle(self, calpha):
         """Reflection coefficient must decrease as angle of incidence increases."""
         ps0_mid = 344.74  # interior pressure level
@@ -350,3 +359,16 @@ class TestTable1DFlagged:
             assert vals[i] == pytest.approx(v)
             assert bool(flags[i]) == f
         assert list(flags) == [True, False, True]
+
+
+def test_table2d_query_on_family_level_uses_that_curve_only():
+    """A family exactly on a level must not be clamped to a neighbour's x range."""
+    import numpy as np
+    from ufc_blast.core.interpolation import Table1D, Table2D
+    lo = Table1D(x=np.array([1.0, 2.0]), y=np.array([1.0, 2.0]))
+    hi = Table1D(x=np.array([1.0, 5.0]), y=np.array([10.0, 50.0]))
+    t = Table2D(family_levels=np.array([1.0, 2.0]), x_tables={1.0: lo, 2.0: hi})
+    v, flag = t.lookup_flagged(x=4.0, family=2.0 * (1 - 1e-7))
+    assert v == 40.0 and not flag
+    vb, fb = t.lookup_batch_flagged(np.array([4.0]), np.array([2.0]))
+    assert vb[0] == 40.0 and not fb[0]
