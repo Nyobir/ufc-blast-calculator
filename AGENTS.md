@@ -7,15 +7,20 @@ Read this before changing code. User-facing documentation is in `README.md`.
 ## Quick reference
 
 ```bash
-uv sync --extra dev                    # install with test dependencies
-uv run pytest tests/ -v                # 119 tests, a few seconds
-uv run pytest tests/test_X.py -v       # single module
-uv run python -m ufc_blast             # launch GUI (default entry point)
-uv run ufc-blast point --W 200 --R 30 --Hc 5 --alpha 0
-uv run ufc-blast compute --W 200 --R 30 --Hc 5 --width 20 --height 10 --step 0.25 -o facade.csv
-uv run ufc-blast batch --W 200 --R 30 --Hc 5 --alphas 0,15,30,45 --format csv
-uv run ufc-blast gui-check             # headless GUI smoke test (used in CI)
-pyinstaller ufc_blast.spec             # Windows bundle (onedir)
+uv sync --locked --extra dev                           # core/CLI development environment
+uv run --locked --extra dev pytest tests/ -q           # GUI tests may skip without PySide6
+uv sync --locked --extra dev --extra gui               # optional desktop GUI
+QT_QPA_PLATFORM=offscreen uv run --locked --extra dev --extra gui pytest tests/ -q
+                                                        # 122 passed on reviewed Pi/Mac candidate
+uv run --locked --extra dev pytest tests/test_X.py -v # single module
+uv run --locked --extra gui python -m ufc_blast        # launch GUI
+uv run --locked --extra dev ufc-blast point --W 200 --R 30 --Hc 5 --alpha 0
+uv run --locked --extra dev ufc-blast compute --W 200 --R 30 --Hc 5 --width 20 --height 10 --step 0.25 -o facade.csv
+uv run --locked --extra dev ufc-blast batch --W 200 --R 30 --Hc 5 --alphas 0,15,30,45 --format csv
+QT_QPA_PLATFORM=offscreen uv run --locked --extra gui ufc-blast gui-check
+uv build --no-sources                                   # sdist and wheel
+uv run --locked --extra dev python scripts/check_release_wheel.py dist/ufc_blast-1.3.0-py3-none-any.whl
+pyinstaller ufc_blast.spec                              # Windows onedir bundle
 ```
 
 ## What this project is
@@ -33,8 +38,10 @@ It is a research and teaching tool, not a certified design tool (see `NOTICE`).
 
 ## Architecture: the golden rule
 
-**`compute_facade()` in `ufc_blast/core/blast_params.py` is the single computation
-path.** CLI and GUI both call it. Never duplicate calculation logic in `cli.py` or
+**`compute_facade()` in `ufc_blast/core/blast_params.py` is the shared facade
+computation path.** CLI and GUI both call it. `compute_point()` is a separate
+regular-reflection query at a specified angle and does not apply the facade's
+Mach-region correction. Never duplicate calculation logic in `cli.py` or
 `gui.py`; `tests/test_compute_facade.py` and `tests/test_gui.py` enforce this.
 
 ```
@@ -57,6 +64,10 @@ Input (W, R, Hc, width, height, step)
 - Out-of-range queries are **clamped and flagged** (`extrapolated` set,
   `lookup_flagged`), never silently extrapolated. The CLI warns, the GUI hatches the
   affected region. Keep this behaviour.
+- The 0.397 scaled-height switch is a chart-selection convention, not a physical
+  discontinuity; scaled heights 0.3–0.5 receive a sensitivity warning.
+- `t0_fictitious` is an informational flag for the Mach-front duration adjustment;
+  chart-limit flags and `friedlander_b` still need attention.
 
 ## Critical pitfalls (learned from past bugs)
 
@@ -99,18 +110,25 @@ reflection regime around 40–45° before declining. Tests must compare α = 0 w
   `onefile` is slow and AV-blocked (use `onedir` + zip);
   `matplotlib.backends.backend_qtagg` must be in `hiddenimports`.
 - When adding data directories, update the `datas` list in `ufc_blast.spec` and the
-  frozen-path logic (`sys._MEIPASS`) in `blast_params.py`.
+  frozen-path logic (`sys._MEIPASS`) in `blast_params.py`, plus the wheel payload
+  in `pyproject.toml`. Source, wheel and frozen executables resolve data differently.
 - Column `pso_kpa` vs `ps0_kpa` (letter o vs digit 0): use `ps0_kpa`.
+- On macOS the wheel checker can fail its temporary import-path assertion if
+  `TMPDIR` is the symlinked `/var/folders/...`. Re-run the unchanged checker
+  with `TMPDIR` set to the real path and inspect independent CSV hashes and
+  installed-wheel smoke results before diagnosing a package-data failure.
 
 ## Data
 
-The 17 SI tables in `data/` were extracted from UFC 3-340-02 charts (approved for
-public release, unlimited distribution; see `NOTICE`). Details and processing in
-[docs/data-sources.md](docs/data-sources.md).
+The 19 SI-normalized CSV tables in `data/free_air/` (13) and `data/surface/`
+(6) derive from UFC 3-340-02 charts (approved for public release, unlimited
+distribution; see `NOTICE`). Wheels carry these tables under `ufc_blast/data/`;
+raw inputs are not bundled. Details in [docs/data-sources.md](docs/data-sources.md).
 
 | Figure | File | Content |
 |--------|------|---------|
 | 2-7 | `free_air/figure_2_7_*.csv` | Ps0, tA, t0, ir, is vs Z (free-air burst) |
+| 2-9, 2-10 | `free_air/figure_2_9_pra.csv`, `figure_2_10_ira.csv` | ground-evaluated Mach-front pressure and impulse |
 | 2-13 | `free_air/figure_2_13_triple_point.csv` | triple-point (Mach stem) height |
 | 2-15 | `surface/figure_2_15_*.csv` | Ps0, tA, t0 vs Z (surface burst) |
 | 2-193 | `free_air/figure_2_193_calpha.csv` | reflection coefficient C_alpha(angle, Ps0) |
@@ -131,13 +149,20 @@ CSV column names always carry units (`z_m_kg13`, `ps0_kpa`, ...) and must match 
 
 ## Validation
 
-### Reference values (W = 200 kg, R = 30 m, Hc = 5 m, α = 0°)
-- Z = 5.13 m/kg^(1/3), Ps0 = 29.67 kPa, C_alpha = 2.186, Pr = 64.86 kPa
-- ir = 468.4 kPa·ms, tA = 54.6 ms, t0 = 19.8 ms, b = 1.034
-- 20 m × 10 m facade at 0.25 m step: 3,321 points, centre Pr ≈ 58.3 kPa
+### Reference values (W = 200 kg, R = 30 m, Hc = 5 m)
+- `ufc-blast point --alpha 0` is a **regular-reflection point query**:
+  Z = 5.13 m/kg^(1/3), Ps0 = 29.67 kPa, C_alpha = 2.186,
+  Pr = 64.864 kPa, ir = 0.468400 kPa·s, tA = 54.598 ms,
+  t0 = 19.818 ms, b = 1.0341.
+- A 20 m × 10 m facade at 0.25 m step has 3,321 points. Its centre
+  `(dx=0, dy=0)` lies in the **ground-evaluated Mach region** and gives
+  Pr = 110.081271 kPa, ir = 0.622702163 kPa·s, with no chart-limit flags.
+  Do not substitute the point-command value for the corrected facade centre.
 
-If a change moves these numbers, it changes the published results
-(tag `manuscript-v1.2`); treat that as a deliberate, documented decision.
+The old `manuscript-v1.2` tag describes the previous method, not this
+revision. The SoftwareX numerical audit is anchored to commit `9d287e0`;
+the reviewed packaging/GUI candidate is `1d69fe4`. Future numerical changes
+require explicit documentation and revalidation.
 
 ### Cross-checks
 - `scripts/cross_chart_check.py`: Pr from the reflected-pressure chart vs
@@ -153,7 +178,8 @@ Pearson r ≥ 0.90, impulse error ≤ 15 %, peak pressure error ≤ 20 %.
 ## Boundaries
 
 **Always**
-- Run `uv run pytest tests/ -v` after any change to core modules.
+- Run `uv run --locked --extra dev --extra gui pytest tests/ -q` after any
+  change to core modules (use `QT_QPA_PLATFORM=offscreen` on headless hosts).
 - Use keyword arguments for `Table2D.from_csv()` and `Table2D.lookup()`.
 - Keep `compute_facade()` as the single entry point for facade calculations.
 - Keep facade code vectorized and out-of-range values flagged.
@@ -171,8 +197,8 @@ Pearson r ≥ 0.90, impulse error ≤ 15 %, peak pressure error ≤ 20 %.
 
 ## Detailed documentation
 
-- [docs/calculation-pipeline.md](docs/calculation-pipeline.md): full algorithm walkthrough (Ukrainian, 10 steps)
+- [docs/calculation-pipeline.md](docs/calculation-pipeline.md): current algorithm walkthrough (Ukrainian)
 - [docs/unit-conversions.md](docs/unit-conversions.md): imperial-to-SI factors and traps
 - [docs/data-sources.md](docs/data-sources.md): provenance, workbook layout, digitization details
 - [docs/design-decisions.md](docs/design-decisions.md): why PySide6, why log-log, rejected approaches
-- [docs/friedlander-parameters.md](docs/friedlander-parameters.md): waveform formulas, b-solver, test values
+- [docs/friedlander-parameters.md](docs/friedlander-parameters.md): waveform formulas, solver limits and distinct point/facade checks
