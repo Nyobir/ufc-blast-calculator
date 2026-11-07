@@ -65,6 +65,16 @@ outside the repository. Reproduce by passing it explicitly with `--grf` to
 CSV (git history) and a separate `--output` path. This is a DPlot extension,
 not a second pass of manual PDF digitization.
 
+The revised ground-evaluated Mach procedure additionally uses official UFC
+electronic DPlot numerical series for Figures 2-9 (ground reflected pressure)
+and 2-10 (ground reflected scaled impulse). Their SI-normalized outputs are
+`data/free_air/figure_2_9_pra.csv` and `figure_2_10_ira.csv`, 2,000 data rows
+each. These are distinct from the Figure 2-13 triple-point-height table:
+Figure 2-13 locates the Mach-region boundary but does not supply the front
+pressure or impulse. Original `.grf` files remain outside this repository;
+do not describe the new tables as manual workbook entries or assert that the
+original plotting files are bundled.
+
 
 ## Final CSV Files
 
@@ -77,6 +87,10 @@ not a second pass of manual PDF digitization.
 | figure_2_7_wpd_is.csv | 176 | z_m_kg13, is_kpa_ms_kg13 |
 | figure_2_7_tA.csv | 123 | z_m_kg13, tA_scaled_ms_kg13 |
 | figure_2_7_t0.csv | 167 | z_m_kg13, t0_scaled_ms_kg13 |
+| figure_2_7_incident.csv | 53 | z_m_kg13, ps0_kpa (legacy comparison table; not selected by `load_ufc_tables()`) |
+| figure_2_7_impulse.csv | 51 | z_m_kg13, is_kpa_ms_kg13 (legacy comparison table; not selected by `load_ufc_tables()`) |
+| figure_2_9_pra.csv | 2000 | hc_scaled_m_kg13, angle_deg, pra_kpa (ground Mach pressure) |
+| figure_2_10_ira.csv | 2000 | hc_scaled_m_kg13, angle_deg, ira_scaled_kpa_ms_kg13 (ground Mach impulse) |
 | figure_2_193_calpha.csv | 2205 (2191 original + 14 DPlot tail) | ps0_kpa, angle_deg, calpha |
 | figure_2_194_iralpha.csv | 1096 | ps0_kpa, angle_deg, iralpha_kpa_ms_kg13 |
 | figure_2_13_triple_point.csv | 1388 | hc_scaled_m_kg13, rg_scaled_m_kg13, ht_scaled_m_kg13 |
@@ -90,6 +104,13 @@ not a second pass of manual PDF digitization.
 | figure_2_15_wpd_pr.csv | 232 | (extra, not currently loaded) |
 | figure_2_15_wpd_ir.csv | 129 | (extra, not currently loaded) |
 | figure_2_15_wpd_is.csv | 167 | (extra, not currently loaded) |
+
+The 13 free-air plus 6 surface CSV files above total **19 normalized tables**.
+Hatch includes those tables under `ufc_blast/data/` in an installed wheel;
+`data/surface/raw/` and `data/triple_point/` are not part of that normalized
+wheel payload. Source checkouts, installed wheels and frozen Windows bundles
+resolve their data paths separately; the release wheel checker compares all
+19 payload hashes against the source tables.
 
 ### Column Naming Convention
 Units always in column names: `z_m_kg13` = Z in m/kg^(1/3), `ps0_kpa` = Ps0 in kPa.
